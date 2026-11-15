@@ -1,0 +1,6 @@
+{
+  "name": "AEROSTRIKE Tactical UAV Simulator",
+  "description": "Real-world open-world 3D drone combat and ballistics simulator with 6-DOF flight physics, modular military ordnance, dynamic weather, solar-gravitational modeling, topographical mission maps, and WebSocket multiplayer arenas.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
