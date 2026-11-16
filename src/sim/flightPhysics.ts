@@ -464,6 +464,15 @@ export function stepDroneFlight(
   // Instantaneous G-load felt by airframe
   const gLoad = Math.max(-3, Math.min(airframe.maxG + 2, (liftN / (totalMassKg * 9.80665))));
 
+  // Recompute authoritative post-integration telemetry:
+  // distinguish wind-relative airspeed from inertial ground speed & Mach
+  const postRelVx = vx - windVx;
+  const postRelVy = vy - windVy;
+  const postRelVz = vz - windVz;
+  const postAirspeedMs = Math.hypot(postRelVx, postRelVy, postRelVz);
+  const groundSpeedMs = Math.hypot(vx, vy, vz);
+  const postMach = postAirspeedMs / atmos.speedOfSoundMs;
+
   return {
     ...state,
     x,
@@ -476,8 +485,9 @@ export function stepDroneFlight(
     yaw,
     roll,
     throttle,
-    airspeedMs: Math.hypot(vx, vy, vz),
-    mach,
+    airspeedMs: postAirspeedMs,
+    groundSpeedMs,
+    mach: postMach,
     aglMeters,
     aoaDeg,
     gLoad,
@@ -732,20 +742,39 @@ export function predictOrdnanceTrajectory(
   let apogeeM = sim.y;
   let maxMach = drone.mach;
 
-  const stepDt = 0.25;
-  const maxSteps = spec.category === 'cannon' ? 18 : 96;
+  // Use a 0.05s integration step aligned with stepOrdnance's stability bound and
+  // normalize timeScale to 1.0 so CCRP/CCIP prediction arcs are invariant to slow-motion.
+  const stepDt = 0.05;
+  const maxSteps = spec.category === 'cannon' ? 80 : 480;
+  const sampleStride = spec.category === 'cannon' ? 4 : 10;
+  const previewCtx = {
+    ...ctx,
+    sandbox: { ...ctx.sandbox, timeScale: 1.0 },
+    targetPos,
+  };
+  const theater = THEATERS[ctx.theaterId];
+  const densityMult = ctx.sandbox.enabled ? ctx.sandbox.airDensityMultiplier : 1.0;
+  const gravMult = ctx.sandbox.enabled ? ctx.sandbox.gravityMultiplier : 1.0;
 
   for (let i = 0; i < maxSteps; i++) {
-    sim = stepOrdnance(sim, { ...ctx, targetPos }, stepDt);
+    sim = stepOrdnance(sim, previewCtx, stepDt);
     apogeeM = Math.max(apogeeM, sim.y);
-    maxMach = Math.max(maxMach, Math.hypot(sim.vx, sim.vy, sim.vz) / 340);
+    const atmos = computeAtmosphericGravity(
+      theater.latDeg,
+      sim.y + theater.baseElevationM,
+      sim.vx,
+      sim.vz,
+      gravMult,
+      densityMult,
+    );
+    maxMach = Math.max(maxMach, Math.hypot(sim.vx, sim.vy, sim.vz) / atmos.speedOfSoundMs);
 
-    if (i % 2 === 0) {
+    if (i % sampleStride === 0) {
       points.push({ x: sim.x, y: sim.y, z: sim.z, t: sim.ageSec });
     }
 
     const groundY = Math.max(
-      THEATERS[ctx.theaterId].waterLevelM,
+      theater.waterLevelM,
       groundHeightAt(ctx.theaterId, sim.x, sim.z),
     );
     if (sim.y <= groundY) {

@@ -200,8 +200,10 @@ export function stepAiCombatBot(
     compromisedKind: string | null;
     gnssSpoofed: boolean;
     dt: number;
+    rng?: () => number;
   },
 ): AiStepResult {
+  const rand = ctx.rng ?? Math.random;
   const dt = Math.min(0.05, Math.max(0.001, ctx.dt));
   const next = { ...bot };
   next.cannonCooldown = Math.max(0, next.cannonCooldown - dt);
@@ -404,13 +406,13 @@ export function stepAiCombatBot(
     // Fire 20mm tracer bursts when nose is aligned (< 22 deg) and inside gun envelope (< 1250m)
     if (noseDot > 0.92 && tDist < 1250 && next.cannonCooldown <= 0) {
       wantsCannon = true;
-      next.cannonCooldown = 0.24 + Math.random() * 0.14;
+      next.cannonCooldown = 0.24 + rand() * 0.14;
     }
 
     // Fire AAM/ATGM when aligned (< 32 deg) and in range (350m - 2100m)
     if (noseDot > 0.84 && tDist > 340 && tDist < 2100 && next.missileCooldown <= 0) {
       wantsMissile = true;
-      next.missileCooldown = next.team === 'alpha' ? 7.5 : 8.5 + Math.random() * 3.5;
+      next.missileCooldown = next.team === 'alpha' ? 7.5 : 8.5 + rand() * 3.5;
     }
   }
 

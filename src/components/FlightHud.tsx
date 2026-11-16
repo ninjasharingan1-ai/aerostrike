@@ -96,6 +96,10 @@ export const FlightHud: React.FC<FlightHudProps> = ({
   const altAglVal = metricUnits ? hud.altitudeAgl : Math.round(hud.altitudeAgl * 3.28084);
   const altMslVal = metricUnits ? hud.altitudeMsl : Math.round(hud.altitudeMsl * 3.28084);
   const altUnit = metricUnits ? 'm' : 'ft';
+  const gsVal = metricUnits ? hud.groundSpeedKnots : Math.round(hud.groundSpeedKnots * 1.852);
+  const vsVal = metricUnits
+    ? `${hud.verticalSpeedMs >= 0 ? '+' : ''}${hud.verticalSpeedMs}m/s`
+    : `${hud.verticalSpeedMs >= 0 ? '+' : ''}${Math.round(hud.verticalSpeedMs * 196.85)}fpm`;
 
   return (
     <div className="fixed inset-0 z-10 pointer-events-none flex flex-col justify-between p-4 md:p-5">
@@ -556,7 +560,9 @@ export const FlightHud: React.FC<FlightHudProps> = ({
             <div className="text-base font-bold text-white leading-tight">
               {speedVal} <span className="text-[11px] font-normal text-slate-400">{speedUnit}</span>
             </div>
-            <div className="text-[10px] text-sky-400">M {hud.mach.toFixed(2)}</div>
+            <div className="text-[10px] text-sky-400">
+              M {hud.mach.toFixed(2)} · GS {gsVal}
+            </div>
           </div>
 
           <div className="h-8 w-px bg-slate-800" />
@@ -566,7 +572,9 @@ export const FlightHud: React.FC<FlightHudProps> = ({
             <div className="text-base font-bold text-white leading-tight">
               {altAglVal} <span className="text-[11px] font-normal text-slate-400">{altUnit} AGL</span>
             </div>
-            <div className="text-[10px] text-slate-400">{altMslVal}{altUnit} MSL</div>
+            <div className="text-[10px] text-slate-400">
+              {altMslVal}{altUnit} MSL · V/S {vsVal}
+            </div>
           </div>
 
           <div className="h-8 w-px bg-slate-800" />
@@ -607,7 +615,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
         </div>
 
         {/* Right: 4-Slot Modular Ordnance & Countermeasure/Kamikaze/Fire Actions */}
-        <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1.5 pointer-events-auto">
+        <div className="flex flex-wrap items-center justify-center xl:justify-end gap-1 pointer-events-auto">
           {loadout.slots.map((wId, idx) => {
             const w = WEAPONS[wId];
             const isSelected = hud.activeSlot === idx;
@@ -622,17 +630,17 @@ export const FlightHud: React.FC<FlightHudProps> = ({
                   e.currentTarget.blur();
                   onSelectSlot(idx);
                 }}
-                className={`px-2 py-1.5 rounded border text-left transition-colors cursor-pointer min-w-[92px] max-w-[122px] whitespace-nowrap ${
+                className={`px-2 py-1.5 rounded border text-left transition-colors cursor-pointer min-w-[104px] whitespace-nowrap ${
                   isSelected
                     ? 'bg-[#171d26]/95 border-amber-400 text-white shadow-md'
                     : 'bg-[#090e16]/95 border-slate-700/80 text-slate-300 hover:border-slate-500'
                 }`}
               >
-                <div className="flex items-center justify-between gap-1.5 text-[10px] font-mono-tabular">
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono-tabular">
                   <span className={isSelected ? 'text-amber-400 font-bold' : 'text-slate-400'}>
                     [{idx + 1}] {w.natoCode}
                   </span>
-                  <span className="font-bold text-white">{cd > 0 ? `${cd.toFixed(1)}s` : `x${ammo}`}</span>
+                  <span className="font-bold text-white shrink-0">{cd > 0 ? `${cd.toFixed(1)}s` : `x${ammo}`}</span>
                 </div>
                 <div className="text-[11px] font-medium truncate mt-0.5">{w.name.split(' ')[0]} {w.name.split(' ')[1] ?? ''}</div>
               </button>
@@ -648,14 +656,14 @@ export const FlightHud: React.FC<FlightHudProps> = ({
                 e.currentTarget.blur();
                 onArmKamikaze();
               }}
-              className={`px-2.5 py-2 rounded border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
+              className={`px-2 py-2 rounded border text-xs font-semibold inline-flex items-center gap-1 cursor-pointer whitespace-nowrap shrink-0 transition-colors ${
                 hud.kamikazeArmed
                   ? 'bg-rose-600 border-rose-400 text-white'
                   : 'bg-[#090e16]/95 hover:bg-rose-950/60 border-rose-500/60 text-rose-300'
               }`}
             >
               <Bomb className="w-3.5 h-3.5" />
-              {hud.kamikazeArmed ? 'DIVE ARMED [B]' : 'Kamikaze [B]'}
+              {hud.kamikazeArmed ? 'ARMED [B]' : 'Kamikaze [B]'}
             </button>
           )}
 
@@ -696,7 +704,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
               e.currentTarget.blur();
               onFire();
             }}
-            className="px-3 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs tracking-wide cursor-pointer whitespace-nowrap shrink-0"
+            className="px-2.5 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs tracking-wide cursor-pointer whitespace-nowrap shrink-0"
           >
             Fire [LMB]
           </button>

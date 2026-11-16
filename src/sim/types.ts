@@ -258,6 +258,7 @@ export interface DroneFlightState {
   roll: number;
   throttle: number;
   airspeedMs: number;
+  groundSpeedMs: number;
   mach: number;
   aglMeters: number;
   aoaDeg: number;
@@ -416,6 +417,8 @@ export interface AirContactHud {
 
 export interface HudSnapshot {
   airspeedKnots: number;
+  groundSpeedKnots: number;
+  verticalSpeedMs: number;
   mach: number;
   altitudeMsl: number;
   altitudeAgl: number;

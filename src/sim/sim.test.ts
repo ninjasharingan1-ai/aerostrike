@@ -29,6 +29,14 @@ import {
   formatSortieClock,
 } from './aarLogger';
 import { evaluateCyberLink, isPacketAligned } from './cyberWarfare';
+import {
+  advanceFixedClock,
+  createFixedClock,
+  FIXED_TIMESTEP_SEC,
+  MAX_RAW_FRAME_DT_SEC,
+} from './clock/fixedClock';
+import { SeededRng } from './clock/seededRng';
+import { SimStepInput, SimWorld } from './core/simWorld';
 import { applyGraphicsPreset } from './settings';
 import { computeAtmosphericGravity, computeSolarState } from './solarGravity';
 import { DroneFlightState, SandboxConfig } from './types';
@@ -59,6 +67,7 @@ function makeBaselineDrone(): DroneFlightState {
     roll: 0,
     throttle: 0.75,
     airspeedMs: 85,
+    groundSpeedMs: 85,
     mach: 0.25,
     aglMeters: 450,
     aoaDeg: 0,
@@ -593,5 +602,226 @@ test('War Thunder AI squadron policies execute Boom-and-Zoom, defensive flare ev
   });
   assert.equal(spoofStep.wantsCannon, false);
   assert.equal(spoofStep.wantsMissile, false);
+});
+
+const NEUTRAL_STEP_INPUT: SimStepInput = {
+  pitchOverride: 0,
+  rollOverride: 0,
+  yawOverride: 0,
+  throttleDelta: 0,
+  mouseNdcX: 0,
+  mouseNdcY: 0,
+  mouseSensitivity: 1,
+  invertY: false,
+  freeLooking: false,
+  firingHeld: false,
+  cameraOrbitMode: false,
+};
+
+function runSimWorldForDuration(
+  fps: number,
+  durationSec: number,
+  seed = 0x13572468,
+  configOverrides?: Partial<ReturnType<typeof SimWorld.createDefaultConfig>>,
+): SimWorld {
+  const world = new SimWorld(SimWorld.createDefaultConfig(configOverrides), seed);
+  const dt = 1 / fps;
+  const totalFrames = Math.round(durationSec * fps);
+  for (let f = 0; f < totalFrames; f++) {
+    // Fire ordnance on tick 20% through sortie so ordnance + cooldowns + AI combat run across FPS tiers
+    if (f === Math.round(fps * 1.0)) {
+      world.fireActiveOrdnance(true, []);
+    }
+    const input: SimStepInput =
+      f >= Math.round(fps * 2.0) && f < Math.round(fps * 4.0)
+        ? { ...NEUTRAL_STEP_INPUT, mouseNdcX: 0.35, mouseNdcY: 0.15 }
+        : NEUTRAL_STEP_INPUT;
+    world.stepFrame(dt, true, input, []);
+  }
+  return world;
+}
+
+test('Phase 1: SimWorld produces deterministic frame-rate-independent trajectories across 30, 60, and 144 FPS', () => {
+  const sim60 = runSimWorldForDuration(60, 6, 0xdeadbeef);
+  const sim30 = runSimWorldForDuration(30, 6, 0xdeadbeef);
+  const sim144 = runSimWorldForDuration(144, 6, 0xdeadbeef);
+
+  assert.equal(sim60.clock.tickCount, 360);
+  assert.equal(sim30.clock.tickCount, 360);
+  assert.equal(sim144.clock.tickCount, 360);
+
+  for (const [label, other] of [
+    ['30 FPS', sim30],
+    ['144 FPS', sim144],
+  ] as const) {
+    assert.ok(
+      Math.abs(other.clock.simTimeSec - sim60.clock.simTimeSec) < 1e-6,
+      `${label} simTimeSec drifted`,
+    );
+    assert.ok(Math.abs(other.drone.x - sim60.drone.x) < 1e-5, `${label} drone.x drifted`);
+    assert.ok(Math.abs(other.drone.y - sim60.drone.y) < 1e-5, `${label} drone.y drifted`);
+    assert.ok(Math.abs(other.drone.z - sim60.drone.z) < 1e-5, `${label} drone.z drifted`);
+    assert.ok(Math.abs(other.drone.fuelKg - sim60.drone.fuelKg) < 1e-6, `${label} fuelKg drifted`);
+    assert.ok(
+      Math.abs(other.drone.airspeedMs - sim60.drone.airspeedMs) < 1e-5,
+      `${label} airspeedMs drifted`,
+    );
+    assert.ok(
+      Math.abs(other.drone.groundSpeedMs - sim60.drone.groundSpeedMs) < 1e-5,
+      `${label} groundSpeedMs drifted`,
+    );
+    assert.equal(other.aiBots.length, sim60.aiBots.length);
+    for (let i = 0; i < sim60.aiBots.length; i++) {
+      assert.ok(
+        Math.abs(other.aiBots[i].x - sim60.aiBots[i].x) < 1e-5,
+        `${label} AI bot ${i} x drifted`,
+      );
+      assert.ok(
+        Math.abs(other.aiBots[i].z - sim60.aiBots[i].z) < 1e-5,
+        `${label} AI bot ${i} z drifted`,
+      );
+    }
+    assert.equal(other.rng.getState(), sim60.rng.getState(), `${label} RNG state diverged`);
+  }
+});
+
+test('Phase 1: FixedClock maintains 1.0x real-time parity on 80ms software WebGL frames and clamps tab hitches', () => {
+  const swClock = createFixedClock();
+  // 25 frames at 80ms (12.5 Hz) = 2.0s real time -> must yield 120 fixed ticks (2.0s sim time, no 0.625x slow-mo)
+  for (let i = 0; i < 25; i++) {
+    advanceFixedClock(swClock, 0.08, 1.0, false, () => {});
+  }
+  assert.equal(swClock.tickCount, 120);
+  assert.ok(Math.abs(swClock.simTimeSec - 2.0) < 1e-6);
+
+  // Huge 5s background tab hitch is clamped to MAX_RAW_FRAME_DT_SEC (0.25s = 15 substeps)
+  const hitchClock = createFixedClock();
+  advanceFixedClock(hitchClock, 5.0, 1.0, false, () => {});
+  assert.equal(hitchClock.realTimeSec, MAX_RAW_FRAME_DT_SEC);
+  assert.equal(hitchClock.lastSubsteps, 15);
+  assert.ok(Math.abs(hitchClock.simTimeSec - 15 * FIXED_TIMESTEP_SEC) < 1e-6);
+});
+
+test('Phase 1: SimWorld synchronizes sandbox.timeScale across flight, cooldowns, fuel burn, and AI', () => {
+  const runNeutral = (durationSec: number, timeScale: number) => {
+    const world = new SimWorld(
+      SimWorld.createDefaultConfig({
+        utcHours: 6,
+        sandbox: { ...DEFAULT_SANDBOX, enabled: true, timeScale },
+      }),
+      0xabcdef01,
+    );
+    world.fireActiveOrdnance(true, []);
+    const totalFrames = Math.round(durationSec * 60);
+    const fullThrustInput: SimStepInput = { ...NEUTRAL_STEP_INPUT, throttleDelta: 1 };
+    for (let f = 0; f < totalFrames; f++) {
+      world.stepFrame(1 / 60, true, fullThrustInput, []);
+    }
+    return world;
+  };
+
+  const halfAt4s = runNeutral(4, 0.5);
+  const refAt2s = runNeutral(2, 1.0);
+  const normalAt4s = runNeutral(4, 1.0);
+  const doubleAt4s = runNeutral(4, 2.0);
+  const refAt8s = runNeutral(8, 1.0);
+
+  assert.equal(halfAt4s.clock.tickCount, 120);
+  assert.equal(normalAt4s.clock.tickCount, 240);
+  assert.equal(doubleAt4s.clock.tickCount, 480);
+
+  // 4s real-time @ 0.5x == 2s real-time @ 1.0x; 4s real-time @ 2.0x == 8s real-time @ 1.0x
+  assert.ok(Math.abs(halfAt4s.drone.z - refAt2s.drone.z) < 1e-6);
+  assert.ok(Math.abs(halfAt4s.drone.fuelKg - refAt2s.drone.fuelKg) < 1e-6);
+  assert.ok(Math.abs(doubleAt4s.drone.z - refAt8s.drone.z) < 1e-6);
+  assert.ok(Math.abs(doubleAt4s.drone.fuelKg - refAt8s.drone.fuelKg) < 1e-6);
+  assert.equal(halfAt4s.rng.getState(), refAt2s.rng.getState());
+  assert.equal(doubleAt4s.rng.getState(), refAt8s.rng.getState());
+
+  // Monotonic progression over equal real-time elapsed: 2.0x > 1.0x > 0.5x
+  const startFuel = AIRFRAMES.bayraktar_tb2.maxFuelKg;
+  assert.ok(doubleAt4s.drone.z < normalAt4s.drone.z && normalAt4s.drone.z < halfAt4s.drone.z);
+  assert.ok(
+    startFuel - doubleAt4s.drone.fuelKg > startFuel - normalAt4s.drone.fuelKg &&
+      startFuel - normalAt4s.drone.fuelKg > startFuel - halfAt4s.drone.fuelKg,
+  );
+  assert.ok(doubleAt4s.slotCooldowns[0] <= normalAt4s.slotCooldowns[0]);
+});
+
+test('Phase 1: Flight physics distinguishes wind-relative airspeedMs from inertial groundSpeedMs and vertical speed', () => {
+  const baseline = makeBaselineDrone();
+  const jetstream = stepDroneFlight(
+    baseline,
+    { pitchInput: 0, rollInput: 0, yawInput: 0, throttleDelta: 0 },
+    {
+      theaterId: 'edwards',
+      weatherId: 'jetstream', // 34 m/s lateral wind heading 90 deg (east/+X)
+      utcHours: 19,
+      loadout: DEFAULT_LOADOUT,
+      sandbox: DEFAULT_SANDBOX,
+      ordnanceMassKg: 100,
+      elapsedTimeSec: 0,
+    },
+    FIXED_TIMESTEP_SEC,
+  );
+  // With 34 m/s pure lateral crosswind while flying north (-Z at ~85 m/s),
+  // wind-relative airspeed exceeds inertial groundSpeedMs noticeably.
+  assert.ok(
+    Math.abs(jetstream.airspeedMs - jetstream.groundSpeedMs) > 2.0,
+    `Expected airspeedMs (${jetstream.airspeedMs}) to differ from groundSpeedMs (${jetstream.groundSpeedMs}) under 34 m/s crosswind`,
+  );
+  const atmos = computeAtmosphericGravity(34.9, jetstream.y + 700, jetstream.vx, jetstream.vz);
+  assert.ok(
+    Math.abs(jetstream.mach - jetstream.airspeedMs / atmos.speedOfSoundMs) < 1e-4,
+    'Mach must match post-integration airspeedMs / ISA speedOfSoundMs',
+  );
+});
+
+test('Phase 1: predictOrdnanceTrajectory integrates full (>10s) trajectory independent of sandbox.timeScale', () => {
+  const highBomber = makeBaselineDrone();
+  highBomber.y = 3200;
+  const target = { x: 0, y: 100, z: -4800 };
+
+  const predNormal = predictOrdnanceTrajectory(highBomber, 'gbu39_sdb', target, {
+    theaterId: 'edwards',
+    weatherId: 'clear',
+    sandbox: { ...DEFAULT_SANDBOX, enabled: true, timeScale: 1.0 },
+  });
+  const predSlowMo = predictOrdnanceTrajectory(highBomber, 'gbu39_sdb', target, {
+    theaterId: 'edwards',
+    weatherId: 'clear',
+    sandbox: { ...DEFAULT_SANDBOX, enabled: true, timeScale: 0.25 },
+  });
+
+  assert.ok(
+    predNormal.flightTimeSec > 10,
+    `Expected long glide trajectory >10s (past old 4.8s bug), got ${predNormal.flightTimeSec}`,
+  );
+  assert.ok(Math.abs(predNormal.flightTimeSec - predSlowMo.flightTimeSec) < 1e-6);
+  assert.ok(Math.abs(predNormal.impactX - predSlowMo.impactX) < 1e-6);
+  assert.ok(Math.abs(predNormal.impactZ - predSlowMo.impactZ) < 1e-6);
+});
+
+test('Phase 1: SeededRng reproducibility and hitstop freezes physics ticks then recovers cleanly', () => {
+  const rngA = new SeededRng(0x42424242);
+  const rngB = new SeededRng(0x42424242);
+  for (let i = 0; i < 10; i++) {
+    assert.equal(rngA.next(), rngB.next());
+  }
+  const saved = rngA.getState();
+  const sampleNext = rngA.next();
+  rngA.setState(saved);
+  assert.equal(rngA.next(), sampleNext);
+
+  const world = new SimWorld(SimWorld.createDefaultConfig(), 0x42424242);
+  world.hitstopTimer = 0.05;
+  const pausedStep = world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT, []);
+  assert.equal(pausedStep.substepsExecuted, 0, 'Active hitstop must freeze physics ticks');
+  assert.equal(world.clock.tickCount, 0);
+
+  // Advance enough real time to expire 0.05s hitstop
+  world.stepFrame(0.04, true, NEUTRAL_STEP_INPUT, []);
+  world.stepFrame(0.04, true, NEUTRAL_STEP_INPUT, []);
+  assert.ok(world.clock.tickCount >= 2, 'Simulation must resume normal fixed ticks after hitstop expires');
 });
 

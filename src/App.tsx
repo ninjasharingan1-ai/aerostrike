@@ -11,8 +11,9 @@ import { ThreatWarningOverlay } from './components/ThreatWarningOverlay';
 import { TitleScreen } from './components/TitleScreen';
 import { WeatherSolarModal } from './components/WeatherSolarModal';
 import { FlightViewport, SimCommandBridge } from './engine/FlightViewport';
+import { createInitialDroneState } from './sim/core/simWorld';
 import { GameSettings, loadSettings, saveSettings } from './sim/settings';
-import { AIRFRAMES, DEFAULT_LOADOUT } from './sim/arsenalData';
+import { AIRFRAMES, DEFAULT_LOADOUT, WEAPONS } from './sim/arsenalData';
 import {
   AarEventType,
   AarSortieReport,
@@ -21,7 +22,7 @@ import {
   createAarReport,
 } from './sim/aarLogger';
 import { CYBER_PAYLOADS } from './sim/cyberWarfare';
-import { THEATERS } from './sim/geoTheaters';
+import { groundHeightAt, THEATERS } from './sim/geoTheaters';
 import {
   awardSortieRewards,
   computePilotSkillBonuses,
@@ -62,37 +63,53 @@ const INITIAL_SANDBOX: SandboxConfig = {
   unlockAllInSandbox: false,
 };
 
+const INITIAL_AIRFRAME = AIRFRAMES[DEFAULT_LOADOUT.airframeId];
+const INITIAL_THEATER = THEATERS.edwards;
+const INITIAL_GROUND_Y = Math.max(INITIAL_THEATER.waterLevelM, groundHeightAt('edwards', 0, 950));
+const INITIAL_ALT_MSL = Math.round(INITIAL_GROUND_Y + 420 + INITIAL_THEATER.baseElevationM);
+const INITIAL_SPEED_KTS = Math.round(92 * 1.94384);
+const INITIAL_TARGET = INITIAL_THEATER.landmarks[0];
+
 const INITIAL_HUD: HudSnapshot = {
-  airspeedKnots: 178,
+  airspeedKnots: INITIAL_SPEED_KTS,
+  groundSpeedKnots: INITIAL_SPEED_KTS,
+  verticalSpeedMs: 0,
   mach: 0.27,
-  altitudeMsl: 1120,
+  altitudeMsl: INITIAL_ALT_MSL,
   altitudeAgl: 420,
   headingDeg: 0,
   pitchDeg: 1,
   rollDeg: 0,
   gLoad: 1.0,
   throttlePct: 72,
-  hp: 120,
-  maxHp: 120,
+  hp: INITIAL_AIRFRAME.maxHp,
+  maxHp: INITIAL_AIRFRAME.maxHp,
   fuelPct: 100,
   stalling: false,
   activeSlot: 0,
-  slotAmmo: [4, 4, 2, 60],
+  slotAmmo: DEFAULT_LOADOUT.slots.map((id) => WEAPONS[id].ammoPerSlot) as [
+    number,
+    number,
+    number,
+    number,
+  ],
   slotCooldowns: [0, 0, 0, 0],
-  lockedTargetId: 'ed-radar',
-  lockedTargetKind: 'base',
-  lockedTargetName: 'Rogers Dry Lake Control',
-  lockedTargetDistM: 1150,
-  lockedTargetHpPct: 100,
+  lockedTargetId: INITIAL_TARGET?.id ?? null,
+  lockedTargetKind: INITIAL_TARGET ? 'base' : null,
+  lockedTargetName: INITIAL_TARGET?.name ?? null,
+  lockedTargetDistM: INITIAL_TARGET
+    ? Math.round(Math.hypot(INITIAL_TARGET.x - 0, INITIAL_TARGET.z - 950))
+    : 0,
+  lockedTargetHpPct: INITIAL_TARGET ? 100 : null,
   lockedTargetCompromisedSec: 0,
   incomingCyberThreat: null,
   playerCyberDisruptedSec: 0,
   cyberCooldownSec: 0,
   predictedCepM: 2,
-  predictedApogeeM: 1150,
+  predictedApogeeM: INITIAL_ALT_MSL,
   score: 0,
   targetsDestroyed: 0,
-  totalTargets: 6,
+  totalTargets: INITIAL_THEATER.landmarks.length,
   localGravityMs2: 9.8,
   solarElevationDeg: 62,
   solarChargeW: 480,
@@ -113,7 +130,7 @@ const INITIAL_HUD: HudSnapshot = {
   zoomed: false,
   wepActive: false,
   kamikazeArmed: false,
-  kamikazeCapable: true,
+  kamikazeCapable: INITIAL_AIRFRAME.kamikazeCapable,
   reserveDrones: 3,
   blueTickets: 1000,
   redTickets: 1000,
@@ -195,6 +212,20 @@ export default function App() {
 
   const bridgeRef = useRef<SimCommandBridge | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const selfArenaIdRef = useRef<string | null>(null);
+  const theaterIdRef = useRef(theaterId);
+  const callsignRef = useRef(callsign);
+  const airframeIdRef = useRef(loadout.airframeId);
+  const skillBonuses = useMemo(() => computePilotSkillBonuses(progression), [progression]);
+  const maxHpRef = useRef(Math.round(AIRFRAMES[loadout.airframeId].maxHp * skillBonuses.maxHpMult));
+  const wsMountedSyncRef = useRef(false);
+  const wsCallsignMountedRef = useRef(false);
+
+  selfArenaIdRef.current = selfArenaId;
+  theaterIdRef.current = theaterId;
+  callsignRef.current = callsign;
+  airframeIdRef.current = loadout.airframeId;
+  maxHpRef.current = Math.round(AIRFRAMES[loadout.airframeId].maxHp * skillBonuses.maxHpMult);
 
   const pushKillFeed = useCallback((text: string, kind: KillFeedEntry['kind'] = 'system') => {
     setKillFeed((prev) => [
@@ -217,10 +248,23 @@ export default function App() {
     saveSettings(settings);
   }, [settings]);
 
-  // WebSocket Multiplayer Client with auto-reconnect
+  // WebSocket Multiplayer Client with stable connection (rejoins over open socket on theater/loadout/callsign change)
   useEffect(() => {
     let closedByUnmount = false;
     let reconnectTimer: number | undefined;
+
+    const sendArenaJoin = (ws: WebSocket) => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      ws.send(
+        JSON.stringify({
+          type: 'arena:join',
+          theaterId: theaterIdRef.current,
+          callsign: callsignRef.current,
+          airframeId: airframeIdRef.current,
+          maxHp: maxHpRef.current,
+        }),
+      );
+    };
 
     const connect = () => {
       if (closedByUnmount) return;
@@ -230,15 +274,7 @@ export default function App() {
 
       ws.onopen = () => {
         setWsConnected(true);
-        ws.send(
-          JSON.stringify({
-            type: 'arena:join',
-            theaterId,
-            callsign,
-            airframeId: loadout.airframeId,
-            maxHp: AIRFRAMES[loadout.airframeId].maxHp,
-          }),
-        );
+        sendArenaJoin(ws);
       };
 
       ws.onmessage = (event) => {
@@ -247,7 +283,10 @@ export default function App() {
           const type = String(msg.type ?? '');
 
           if (type === 'arena:init') {
-            if (typeof msg.selfId === 'string') setSelfArenaId(msg.selfId);
+            if (typeof msg.selfId === 'string') {
+              selfArenaIdRef.current = msg.selfId;
+              setSelfArenaId(msg.selfId);
+            }
             setRemotePilots((msg.pilots as RemotePilotState[]) ?? []);
             if (msg.targetHp && bridgeRef.current) {
               bridgeRef.current.applyTargetHpSync(msg.targetHp as Record<string, number>);
@@ -258,7 +297,7 @@ export default function App() {
             setRemotePilots((prev) =>
               prev.some((x) => x.id === p.id) ? prev : [...prev, p],
             );
-            pushKillFeed(`${p.callsign} entered ${THEATERS[theaterId].name.split('/')[0]}`, 'system');
+            pushKillFeed(`${p.callsign} entered ${THEATERS[theaterIdRef.current].name.split('/')[0]}`, 'system');
           } else if (type === 'pilot:left') {
             const leftId = String(msg.id ?? '');
             setRemotePilots((prev) => prev.filter((p) => p.id !== leftId));
@@ -318,7 +357,7 @@ export default function App() {
             const attacker = String(msg.attackerCallsign ?? 'Hostile UAV');
             const targetId = String(msg.targetId ?? '');
             const spec = CYBER_PAYLOADS[payloadId];
-            if (targetId && selfArenaId && targetId === selfArenaId) {
+            if (targetId && selfArenaIdRef.current && targetId === selfArenaIdRef.current) {
               bridgeRef.current?.receiveRemoteCyberAttack(payloadId, attacker);
               pushKillFeed(`${attacker} launched ${spec.name} at you!`, 'system');
             } else {
@@ -345,7 +384,48 @@ export default function App() {
       if (reconnectTimer) clearTimeout(reconnectTimer);
       wsRef.current?.close();
     };
-  }, [theaterId, callsign, loadout.airframeId, selfArenaId, pushKillFeed]);
+  }, [pushKillFeed]);
+
+  // Send updated arena:join over existing open socket when theater or airframe changes
+  useEffect(() => {
+    if (!wsMountedSyncRef.current) {
+      wsMountedSyncRef.current = true;
+      return;
+    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(
+        JSON.stringify({
+          type: 'arena:join',
+          theaterId,
+          callsign: callsignRef.current,
+          airframeId: loadout.airframeId,
+          maxHp: Math.round(AIRFRAMES[loadout.airframeId].maxHp * skillBonuses.maxHpMult),
+        }),
+      );
+    }
+  }, [theaterId, loadout.airframeId, skillBonuses.maxHpMult]);
+
+  // Debounce callsign edits before notifying multiplayer arena
+  useEffect(() => {
+    if (!wsCallsignMountedRef.current) {
+      wsCallsignMountedRef.current = true;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(
+          JSON.stringify({
+            type: 'arena:join',
+            theaterId: theaterIdRef.current,
+            callsign,
+            airframeId: airframeIdRef.current,
+            maxHp: maxHpRef.current,
+          }),
+        );
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [callsign]);
 
   const anyModalOpen =
     showHangar ||
@@ -406,21 +486,24 @@ export default function App() {
     (tId: TheaterId, afId: LoadoutConfig['airframeId']) => {
       const af = AIRFRAMES[afId];
       const th = THEATERS[tId];
+      const spawn = createInitialDroneState(tId, afId, skillBonuses);
+      const initAltMsl = Math.round(spawn.y + th.baseElevationM);
+      const initKnots = Math.round(spawn.airspeedMs * 1.94384);
       let fresh = createAarReport(tId, afId, af.maxFuelKg);
       fresh = appendAarSample(
         fresh,
         {
           tSec: 0,
-          x: 0,
-          yMsl: th.baseElevationM + 420,
-          z: 950,
-          aglM: 420,
-          airspeedKnots: 178,
-          mach: 0.27,
+          x: spawn.x,
+          yMsl: initAltMsl,
+          z: spawn.z,
+          aglM: spawn.aglMeters,
+          airspeedKnots: initKnots,
+          mach: Number(spawn.mach.toFixed(2)),
           fuelKg: af.maxFuelKg,
           fuelPct: 100,
-          hp: af.maxHp,
-          throttlePct: 72,
+          hp: spawn.maxHp,
+          throttlePct: Math.round(spawn.throttle * 100),
           gLoad: 1.0,
         },
         0,
@@ -431,14 +514,14 @@ export default function App() {
           type: 'launch',
           title: 'Sortie Airborne',
           detail: `${af.name} launched in ${th.name.split('/')[0]}`,
-          x: 0,
-          z: 950,
-          altMsl: th.baseElevationM + 420,
+          x: spawn.x,
+          z: spawn.z,
+          altMsl: initAltMsl,
           fuelKg: af.maxFuelKg,
         }),
       );
     },
-    [],
+    [skillBonuses],
   );
 
   const handleStartMission = useCallback(() => {
@@ -473,8 +556,6 @@ export default function App() {
     },
     [pushKillFeed],
   );
-
-  const skillBonuses = useMemo(() => computePilotSkillBonuses(progression), [progression]);
 
   const handleUpgradeSkill = useCallback(
     (skillId: PilotSkillId) => {
