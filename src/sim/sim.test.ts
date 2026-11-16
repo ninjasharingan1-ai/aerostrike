@@ -3,13 +3,28 @@ import assert from 'node:assert/strict';
 import { AIRFRAMES, DEFAULT_LOADOUT, WEAPONS } from './arsenalData';
 import { createAiBotSquadron, stepAiCombatBot } from './aiDogfight';
 import {
+  aimAnglesToDirection,
+  computeDirectionAngularErrorRad,
   computeInstructorControlInput,
   computeKamikazeImpactPayload,
   computeLeadPoint,
   predictOrdnanceTrajectory,
   stepDroneFlight,
   stepWarThunderAimAngles,
+  wrapAngleRad,
 } from './flightPhysics';
+import {
+  BASE_AIM_RAD_PER_PX,
+  consumeMouseFrameInput,
+  convertMouseDeltaPxToRadians,
+  createMouseInputState,
+  handleMouseFocusLoss,
+  handleMousePointerEnter,
+  handleMousePointerLeave,
+  handleMousePointerLockChange,
+  handleMousePointerLockError,
+  handleMousePointerMove,
+} from './mouseAimInput';
 import { groundHeightAt, THEATERS, worldToLatLon } from './geoTheaters';
 import {
   awardSortieRewards,
@@ -497,52 +512,64 @@ test('global Ukraine/Israel/Iran/Russia/Syria fleet, real-world ammo, drop-bomb 
   assert.ok(dropPred.points.length >= 3, 'Drop bomb trajectory should produce arc points');
 });
 
-test('War Thunder 360-deg Mouse Aim cursor slews smoothly, freezes during C Free-Look, and syncs on manual override', () => {
-  // Moving mouse right slews aimYaw negatively (turning right in Three.js -Z forward convention)
-  const slewRight = stepWarThunderAimAngles(
-    0,
-    0,
-    0.8,
-    0.2,
-    { pitchOverride: 0, rollOverride: 0, yawOverride: 0 },
-    false,
-    0,
-    0,
-    'mouse_aim',
-    0.05,
-  );
-  assert.ok(slewRight.aimYaw < -0.02, `Expected right slew to decrease yaw, got ${slewRight.aimYaw}`);
-  assert.ok(slewRight.aimPitch > 0.005, `Expected upward slew to increase pitch, got ${slewRight.aimPitch}`);
+test('War Thunder 360-deg Mouse Aim updates only from deltas, freezes during C Free-Look, and syncs on manual override', () => {
+  // Negative yaw delta turns right in Three.js -Z forward convention
+  const slewRight = stepWarThunderAimAngles({
+    aimYaw: 0,
+    aimPitch: 0,
+    aimDeltaYawRad: -0.25,
+    aimDeltaPitchRad: 0.12,
+    manualOverrideActive: false,
+    freeLooking: false,
+    droneYaw: 0,
+    dronePitch: 0,
+    scheme: 'mouse_aim',
+  });
+  assert.ok(Math.abs(slewRight.aimYaw - -0.25) < 1e-6);
+  assert.ok(Math.abs(slewRight.aimPitch - 0.12) < 1e-6);
 
-  // Holding Free-Look ('C') keeps aimYaw/aimPitch frozen regardless of cursor displacement
-  const frozen = stepWarThunderAimAngles(
-    0.55,
-    0.15,
-    0.9,
-    0.9,
-    { pitchOverride: 0, rollOverride: 0, yawOverride: 0 },
-    true,
-    0.1,
-    0,
-    'mouse_aim',
-    0.05,
-  );
+  // Zero delta keeps desired aim invariant
+  const holdStill = stepWarThunderAimAngles({
+    aimYaw: slewRight.aimYaw,
+    aimPitch: slewRight.aimPitch,
+    aimDeltaYawRad: 0,
+    aimDeltaPitchRad: 0,
+    manualOverrideActive: false,
+    freeLooking: false,
+    droneYaw: 0,
+    dronePitch: 0,
+    scheme: 'mouse_aim',
+  });
+  assert.equal(holdStill.aimYaw, slewRight.aimYaw);
+  assert.equal(holdStill.aimPitch, slewRight.aimPitch);
+
+  // Holding Free-Look ('C') keeps aimYaw/aimPitch frozen even if non-zero deltas arrive
+  const frozen = stepWarThunderAimAngles({
+    aimYaw: 0.55,
+    aimPitch: 0.15,
+    aimDeltaYawRad: 0.4,
+    aimDeltaPitchRad: -0.3,
+    manualOverrideActive: false,
+    freeLooking: true,
+    droneYaw: 0.1,
+    dronePitch: 0,
+    scheme: 'mouse_aim',
+  });
   assert.equal(frozen.aimYaw, 0.55);
   assert.equal(frozen.aimPitch, 0.15);
 
   // Holding manual override syncs aim back to drone orientation so release never snaps back
-  const manualOverride = stepWarThunderAimAngles(
-    1.2,
-    0.4,
-    0.8,
-    0.8,
-    { pitchOverride: -1, rollOverride: 0, yawOverride: 0 },
-    false,
-    -0.42,
-    0.12,
-    'mouse_aim',
-    0.05,
-  );
+  const manualOverride = stepWarThunderAimAngles({
+    aimYaw: 1.2,
+    aimPitch: 0.4,
+    aimDeltaYawRad: 0.2,
+    aimDeltaPitchRad: 0.2,
+    manualOverrideActive: true,
+    freeLooking: false,
+    droneYaw: -0.42,
+    dronePitch: 0.12,
+    scheme: 'mouse_aim',
+  });
   assert.equal(manualOverride.aimYaw, -0.42);
   assert.equal(manualOverride.aimPitch, 0.12);
 });
@@ -609,13 +636,13 @@ const NEUTRAL_STEP_INPUT: SimStepInput = {
   rollOverride: 0,
   yawOverride: 0,
   throttleDelta: 0,
-  mouseNdcX: 0,
-  mouseNdcY: 0,
-  mouseSensitivity: 1,
-  invertY: false,
+  aimDeltaYawRad: 0,
+  aimDeltaPitchRad: 0,
+  aimSmoothing: 0,
   freeLooking: false,
   firingHeld: false,
   cameraOrbitMode: false,
+  cameraEoirMode: false,
 };
 
 function runSimWorldForDuration(
@@ -628,13 +655,12 @@ function runSimWorldForDuration(
   const dt = 1 / fps;
   const totalFrames = Math.round(durationSec * fps);
   for (let f = 0; f < totalFrames; f++) {
-    // Fire ordnance on tick 20% through sortie so ordnance + cooldowns + AI combat run across FPS tiers
     if (f === Math.round(fps * 1.0)) {
       world.fireActiveOrdnance(true, []);
     }
     const input: SimStepInput =
       f >= Math.round(fps * 2.0) && f < Math.round(fps * 4.0)
-        ? { ...NEUTRAL_STEP_INPUT, mouseNdcX: 0.35, mouseNdcY: 0.15 }
+        ? { ...NEUTRAL_STEP_INPUT, rollOverride: 0.35, pitchOverride: 0.15 }
         : NEUTRAL_STEP_INPUT;
     world.stepFrame(dt, true, input, []);
   }
@@ -922,5 +948,343 @@ test('Stage A: Combat sound and particle_burst SimEvents emit finite 3D world co
     assert.ok(Number.isFinite(ev.x) && Number.isFinite(ev.y) && Number.isFinite(ev.z));
   }
 });
+
+test('P0 Test A (Stationary Mouse): moving mouse then stopping keeps world-space aim constant and stops turn after convergence', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x11223344);
+  const mouse = createMouseInputState();
+  handleMousePointerEnter(mouse, 640, 400);
+  // Move mouse right by +180 px over 3 frames and up by -40 px, then stop completely
+  for (let i = 1; i <= 3; i++) {
+    handleMousePointerMove(mouse, { clientX: 640 + i * 60, clientY: 400 - i * 13 }, 'aim');
+  }
+  const consumed = consumeMouseFrameInput(mouse, {
+    aimSensitivity: 1.0,
+    freeLookSensitivity: 1.0,
+    invertY: false,
+    aimSmoothing: 0,
+  });
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: consumed.aimDeltaYawRad,
+    aimDeltaPitchRad: consumed.aimDeltaPitchRad,
+  });
+
+  const savedAimYaw = world.aimYaw;
+  const savedAimPitch = world.aimPitch;
+  const savedAimDir = world.getDesiredAimDirection();
+
+  // Now mouse is completely stationary for 5 seconds (300 frames @ 60Hz)
+  for (let f = 0; f < 300; f++) {
+    const zeroConsumed = consumeMouseFrameInput(mouse, {
+      aimSensitivity: 1.0,
+      freeLookSensitivity: 1.0,
+      invertY: false,
+      aimSmoothing: 0,
+    });
+    assert.equal(zeroConsumed.aimDeltaYawRad, 0);
+    assert.equal(zeroConsumed.aimDeltaPitchRad, 0);
+    world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT);
+    assert.equal(world.aimYaw, savedAimYaw, 'Stationary mouse must never drift aimYaw');
+    assert.equal(world.aimPitch, savedAimPitch, 'Stationary mouse must never drift aimPitch');
+    const dirNow = world.getDesiredAimDirection();
+    assert.ok(Math.abs(dirNow.x - savedAimDir.x) < 1e-12);
+    assert.ok(Math.abs(dirNow.y - savedAimDir.y) < 1e-12);
+    assert.ok(Math.abs(dirNow.z - savedAimDir.z) < 1e-12);
+  }
+
+  // Aircraft must have converged to saved aim direction and stopped turning
+  const noseDir = aimAnglesToDirection(world.drone.yaw, world.drone.pitch);
+  const finalErrorDeg = (computeDirectionAngularErrorRad(savedAimDir, noseDir) * 180) / Math.PI;
+  assert.ok(finalErrorDeg < 2.5, `Expected aircraft to settle within 2.5 deg of aim, got ${finalErrorDeg.toFixed(2)} deg`);
+  assert.ok(Math.abs(world.drone.roll) < 0.08, `Expected wings to level once aligned, got roll=${world.drone.roll}`);
+
+  // Run another 1.5s stationary — yaw must stay locked, not keep spinning indefinitely
+  const yawAt5s = world.drone.yaw;
+  for (let f = 0; f < 90; f++) {
+    world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT);
+  }
+  const yawDrift = Math.abs(wrapAngleRad(world.drone.yaw - yawAt5s));
+  assert.ok(yawDrift < 0.03, `Expected aircraft to stop turning once aligned, drifted ${yawDrift.toFixed(4)} rad`);
+});
+
+test('P0 Test B (Convergence): left/right/up/down aims converge cleanly without sustained overshoot or roll flip', () => {
+  for (const [label, dyaw, dpitch] of [
+    ['Right + Level', -0.45, 0.0],
+    ['Left + Climb', 0.45, 0.16],
+    ['Right + Dive', -0.35, -0.18],
+  ] as const) {
+    const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x55667788);
+    world.stepFrame(1 / 60, true, {
+      ...NEUTRAL_STEP_INPUT,
+      aimDeltaYawRad: dyaw,
+      aimDeltaPitchRad: dpitch,
+    });
+    const targetDir = world.getDesiredAimDirection();
+    const initialErr = computeDirectionAngularErrorRad(
+      targetDir,
+      aimAnglesToDirection(world.drone.yaw, world.drone.pitch),
+    );
+    let maxRoll = 0;
+    let errAt2s = initialErr;
+    for (let f = 0; f < 300; f++) {
+      world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT);
+      maxRoll = Math.max(maxRoll, Math.abs(world.drone.roll));
+      if (f === 120) {
+        errAt2s = computeDirectionAngularErrorRad(
+          targetDir,
+          aimAnglesToDirection(world.drone.yaw, world.drone.pitch),
+        );
+      }
+    }
+    const finalErrDeg =
+      (computeDirectionAngularErrorRad(
+        targetDir,
+        aimAnglesToDirection(world.drone.yaw, world.drone.pitch),
+      ) *
+        180) /
+      Math.PI;
+    assert.ok(errAt2s < initialErr * 0.45, `${label}: expected fast convergence by 2s (${errAt2s} vs ${initialErr})`);
+    assert.ok(finalErrDeg < 2.5, `${label}: expected final error < 2.5 deg, got ${finalErrDeg.toFixed(2)}`);
+    assert.ok(maxRoll < 1.25, `${label}: expected controlled bank without roll flip, maxRoll=${maxRoll}`);
+  }
+});
+
+test('P0 Test C (Sensitivity): sensitivity is applied once with linear scaling across 0.5x, 1.0x, 2.0x', () => {
+  const r05 = convertMouseDeltaPxToRadians(120, -60, 0.5, BASE_AIM_RAD_PER_PX, false);
+  const r10 = convertMouseDeltaPxToRadians(120, -60, 1.0, BASE_AIM_RAD_PER_PX, false);
+  const r20 = convertMouseDeltaPxToRadians(120, -60, 2.0, BASE_AIM_RAD_PER_PX, false);
+
+  assert.ok(Math.abs(r10.deltaYawRad / r05.deltaYawRad - 2.0) < 1e-9);
+  assert.ok(Math.abs(r20.deltaYawRad / r10.deltaYawRad - 2.0) < 1e-9);
+  assert.ok(Math.abs(r10.deltaPitchRad / r05.deltaPitchRad - 2.0) < 1e-9);
+  assert.ok(Math.abs(r20.deltaPitchRad / r10.deltaPitchRad - 2.0) < 1e-9);
+
+  // Invert-Y flips only pitch sign
+  const rInv = convertMouseDeltaPxToRadians(120, -60, 1.0, BASE_AIM_RAD_PER_PX, true);
+  assert.equal(rInv.deltaYawRad, r10.deltaYawRad);
+  assert.equal(rInv.deltaPitchRad, -r10.deltaPitchRad);
+});
+
+test('P0 Test D (FPS Parity): identical timestamped mouse + keyboard input produces matching trajectories across 30, 60, and 144 FPS', () => {
+  const replay = (fps: number) => {
+    const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x24681357);
+    const dt = 1 / fps;
+    const totalFrames = Math.round(5.0 * fps);
+    // Timestamped gesture: 150px right over [0.5s..1.0s], then manual roll left over [2.5s..3.0s]
+    let lastBucket = -1;
+    for (let f = 0; f < totalFrames; f++) {
+      const t = f * dt;
+      let aimDeltaYawRad = 0;
+      let aimDeltaPitchRad = 0;
+      if (t >= 0.5 && t < 1.0) {
+        const bucket = Math.floor((t - 0.5) / 0.05);
+        if (bucket > lastBucket) {
+          lastBucket = bucket;
+          aimDeltaYawRad = -0.04;
+          aimDeltaPitchRad = 0.012;
+        }
+      }
+      const rollOverride = t >= 2.5 && t < 3.0 ? 0.65 : 0;
+      world.stepFrame(dt, true, {
+        ...NEUTRAL_STEP_INPUT,
+        aimDeltaYawRad,
+        aimDeltaPitchRad,
+        rollOverride,
+      });
+    }
+    return world;
+  };
+
+  const w60 = replay(60);
+  const w30 = replay(30);
+  const w144 = replay(144);
+
+  for (const [label, other] of [
+    ['30 FPS', w30],
+    ['144 FPS', w144],
+  ] as const) {
+    assert.ok(
+      Math.abs(wrapAngleRad(other.aimYaw - w60.aimYaw)) < 0.015,
+      `${label} aimYaw diverged: ${other.aimYaw} vs ${w60.aimYaw}`,
+    );
+    assert.ok(
+      Math.abs(other.aimPitch - w60.aimPitch) < 0.015,
+      `${label} aimPitch diverged: ${other.aimPitch} vs ${w60.aimPitch}`,
+    );
+    assert.ok(
+      Math.abs(wrapAngleRad(other.drone.yaw - w60.drone.yaw)) < 0.02,
+      `${label} drone.yaw diverged: ${other.drone.yaw} vs ${w60.drone.yaw}`,
+    );
+  }
+});
+
+test('P0 Test E (Free Look): holding C moves free-look offsets while keeping world-space aim completely invariant', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x99887766);
+  const mouse = createMouseInputState();
+  handleMousePointerEnter(mouse, 500, 400);
+  handleMousePointerMove(mouse, { clientX: 580, clientY: 380 }, 'aim');
+  const firstMove = consumeMouseFrameInput(mouse, {
+    aimSensitivity: 1,
+    freeLookSensitivity: 1.5,
+    invertY: false,
+    aimSmoothing: 0,
+  });
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: firstMove.aimDeltaYawRad,
+    aimDeltaPitchRad: firstMove.aimDeltaPitchRad,
+  });
+  const lockedAimYaw = world.aimYaw;
+  const lockedAimPitch = world.aimPitch;
+
+  // Hold 'C' and sweep mouse hard across screen
+  for (let i = 1; i <= 4; i++) {
+    handleMousePointerMove(mouse, { clientX: 580 + i * 90, clientY: 380 - i * 40 }, 'freelook');
+  }
+  const flConsumed = consumeMouseFrameInput(mouse, {
+    aimSensitivity: 1,
+    freeLookSensitivity: 1.5,
+    invertY: false,
+    aimSmoothing: 0,
+  });
+  assert.ok(Math.abs(flConsumed.freeLookDeltaYawRad) > 0.3, 'Expected significant free-look yaw delta');
+  assert.equal(flConsumed.aimDeltaYawRad, 0, 'Expected zero aim delta routed while free-looking');
+
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: 0.99, // Even if rogue non-zero deltas arrive, SimWorld must ignore while freeLooking
+    aimDeltaPitchRad: 0.99,
+    freeLooking: true,
+  });
+  assert.equal(world.aimYaw, lockedAimYaw);
+  assert.equal(world.aimPitch, lockedAimPitch);
+});
+
+test('P0 Test F (Keyboard Handoff): manual flight override updates heading cleanly and never snaps back on release', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x31415926);
+  // Start with aim straight ahead (yaw = 0)
+  assert.equal(world.aimYaw, 0);
+
+  // Hold manual roll left + pull up for 1.5s so drone turns substantially left (+yaw)
+  for (let f = 0; f < 90; f++) {
+    world.stepFrame(1 / 60, true, {
+      ...NEUTRAL_STEP_INPUT,
+      rollOverride: 1.0,
+      pitchOverride: 0.35,
+    });
+  }
+  const yawAtRelease = world.drone.yaw;
+  assert.ok(Math.abs(yawAtRelease) > 0.25, `Expected manual turn > 0.25 rad, got ${yawAtRelease}`);
+  assert.ok(
+    Math.abs(wrapAngleRad(world.aimYaw - yawAtRelease)) < 0.02,
+    'Aim yaw must follow aircraft nose during manual override',
+  );
+
+  // Release keys: aim must NOT snap back to 0, and manualHandoffBlend must ramp smoothly from 0 -> 1
+  world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT);
+  assert.ok(world.manualHandoffBlend < 0.2, 'Handoff blend should start near 0 right after key release');
+  assert.ok(Math.abs(wrapAngleRad(world.aimYaw - yawAtRelease)) < 0.05, 'Must not snap back toward old aimYaw=0');
+
+  for (let f = 0; f < 45; f++) {
+    world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT);
+  }
+  assert.equal(world.manualHandoffBlend, 1);
+  assert.ok(Math.abs(wrapAngleRad(world.aimYaw - yawAtRelease)) < 0.08, 'Heading should remain near release direction');
+});
+
+test('P0 Test G (Camera Switching): switching Chase -> EO/IR -> Flyby -> Orbit -> Chase preserves world-space aim', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x10203040);
+  world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, aimDeltaYawRad: -0.35, aimDeltaPitchRad: 0.14 });
+  const expectedYaw = world.aimYaw;
+  const expectedPitch = world.aimPitch;
+
+  // EO/IR mode ignores aim deltas
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: 0.5,
+    aimDeltaPitchRad: -0.5,
+    cameraEoirMode: true,
+  });
+  assert.equal(world.aimYaw, expectedYaw);
+  assert.equal(world.aimPitch, expectedPitch);
+
+  // Orbit mode ignores aim deltas
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: -0.5,
+    aimDeltaPitchRad: 0.5,
+    cameraOrbitMode: true,
+  });
+  assert.equal(world.aimYaw, expectedYaw);
+  assert.equal(world.aimPitch, expectedPitch);
+
+  // Return to Chase mode and apply small refinement delta
+  world.stepFrame(1 / 60, true, {
+    ...NEUTRAL_STEP_INPUT,
+    aimDeltaYawRad: -0.05,
+    aimDeltaPitchRad: 0.02,
+  });
+  assert.ok(Math.abs(wrapAngleRad(world.aimYaw - (expectedYaw - 0.05))) < 1e-6);
+  assert.ok(Math.abs(world.aimPitch - (expectedPitch + 0.02)) < 1e-6);
+});
+
+test('P0 Test H (Pointer Lock, Focus Recovery & Spike Rejection): lock transitions, leave/enter, blur, and large jumps never corrupt aim', () => {
+  const mouse = createMouseInputState();
+
+  // Pointer lock acquisition ignores 1 warp sample, then processes clean movementX/Y
+  handleMousePointerLockChange(mouse, true);
+  const warpIgnored = handleMousePointerMove(
+    mouse,
+    { clientX: 700, clientY: 450, movementX: 320, movementY: -220 },
+    'aim',
+  );
+  assert.equal(warpIgnored.ignored, true);
+
+  const lockedMove = handleMousePointerMove(
+    mouse,
+    { clientX: 700, clientY: 450, movementX: 40, movementY: -10 },
+    'aim',
+  );
+  assert.equal(lockedMove.ignored, false);
+  assert.equal(lockedMove.dx, 40);
+  assert.equal(lockedMove.dy, -10);
+
+  // Pointer lock error / release falls back cleanly to unlocked clientX/Y with fresh anchor
+  handleMousePointerLockError(mouse);
+  assert.equal(mouse.pointerLocked, false);
+  const anchorSample = handleMousePointerMove(mouse, { clientX: 200, clientY: 200 }, 'aim');
+  assert.equal(anchorSample.ignored, true);
+  const unlockedMove = handleMousePointerMove(mouse, { clientX: 230, clientY: 215 }, 'aim');
+  assert.equal(unlockedMove.ignored, false);
+  assert.equal(unlockedMove.dx, 30);
+  assert.equal(unlockedMove.dy, 15);
+
+  // Pathological OS cursor teleport > MAX_POINTER_DELTA_PX is dropped
+  const spike = handleMousePointerMove(mouse, { clientX: 1200, clientY: 215 }, 'aim');
+  assert.equal(spike.ignored, true);
+
+  // Blur / pointerleave / pointerenter purges pending deltas cleanly
+  handleMouseFocusLoss(mouse);
+  const afterBlur = consumeMouseFrameInput(mouse, {
+    aimSensitivity: 1,
+    freeLookSensitivity: 1,
+    invertY: false,
+    aimSmoothing: 0,
+  });
+  assert.equal(afterBlur.aimDeltaYawRad, 0);
+  assert.equal(afterBlur.aimDeltaPitchRad, 0);
+
+  handleMousePointerEnter(mouse, 800, 500);
+  handleMousePointerLeave(mouse);
+  handleMousePointerEnter(mouse, 100, 100);
+  const postReenter = consumeMouseFrameInput(mouse, {
+    aimSensitivity: 1,
+    freeLookSensitivity: 1,
+    invertY: false,
+    aimSmoothing: 0,
+  });
+  assert.equal(postReenter.aimDeltaYawRad, 0);
+});
+
 
 

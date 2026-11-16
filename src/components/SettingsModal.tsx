@@ -137,7 +137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
                 </div>
 
-                <div className="bg-slate-900/75 border border-slate-800 rounded p-3.5 space-y-3">
+                <div className="bg-slate-900/75 border border-slate-800 rounded p-3.5 space-y-3.5">
                   <div>
                     <div className="flex items-center justify-between text-xs mb-1">
                       <label htmlFor="mouse-sens" className="text-slate-200 font-medium">
@@ -150,8 +150,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <input
                       id="mouse-sens"
                       type="range"
-                      min={0.4}
-                      max={2.2}
+                      min={0.2}
+                      max={3.0}
                       step={0.05}
                       value={settings.controls.mouseSensitivity}
                       onChange={(e) =>
@@ -167,7 +167,65 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     />
                   </div>
 
-                  <label className="flex items-center justify-between text-xs text-slate-200 cursor-pointer">
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <label htmlFor="freelook-sens" className="text-slate-200 font-medium">
+                        Free-Look Sensitivity [C]
+                      </label>
+                      <span className="font-mono-tabular text-sky-400 font-bold">
+                        {settings.controls.freeLookSensitivity.toFixed(2)}x
+                      </span>
+                    </div>
+                    <input
+                      id="freelook-sens"
+                      type="range"
+                      min={0.2}
+                      max={3.0}
+                      step={0.05}
+                      value={settings.controls.freeLookSensitivity}
+                      onChange={(e) =>
+                        onChangeSettings({
+                          ...settings,
+                          controls: {
+                            ...settings.controls,
+                            freeLookSensitivity: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full accent-sky-400 cursor-pointer"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between text-xs mb-1">
+                      <label htmlFor="aim-smoothing" className="text-slate-200 font-medium">
+                        Aim Input Smoothing
+                      </label>
+                      <span className="font-mono-tabular text-emerald-400 font-bold">
+                        {Math.round(settings.controls.aimSmoothing * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      id="aim-smoothing"
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.05}
+                      value={settings.controls.aimSmoothing}
+                      onChange={(e) =>
+                        onChangeSettings({
+                          ...settings,
+                          controls: {
+                            ...settings.controls,
+                            aimSmoothing: Number(e.target.value),
+                          },
+                        })
+                      }
+                      className="w-full accent-emerald-400 cursor-pointer"
+                    />
+                  </div>
+
+                  <label className="flex items-center justify-between text-xs text-slate-200 cursor-pointer pt-1">
                     <span>Invert Mouse &amp; Pitch Y-Axis</span>
                     <input
                       type="checkbox"
@@ -207,7 +265,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <h3 className="text-sm font-semibold text-white mb-3">PC Gamer Bindings</h3>
                 <div className="space-y-2 text-xs font-mono-tabular">
                   {[
-                    ['Mouse Move', 'Steer Aim Reticle (Mouse Aim)'],
+                    ['Mouse Move', 'Adjust World-Space Aim Reticle (Click Canvas to Lock)'],
                     ['Left Click / Space', 'Fire / Release Active Ordnance'],
                     ['Right Click / Z', 'Toggle Sniper Target Zoom'],
                     ['Scroll Wheel / Shift / Ctrl', 'Throttle & WEP (110%)'],
@@ -215,7 +273,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     ['1 – 4', 'Select Hardpoint Ordnance Slot'],
                     ['Tab', 'Cycle & Lock Next Target'],
                     ['F', 'Deploy IR Flares & Chaff'],
-                    ['Hold C', 'Free-Look Around Aircraft'],
+                    ['Hold C', 'Free-Look Around Aircraft (Freezes Aim)'],
                     ['U / K / H / O', 'Camera / Cyber EW / Hangar / Settings'],
                   ].map(([k, desc]) => (
                     <div

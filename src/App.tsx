@@ -121,6 +121,9 @@ const INITIAL_HUD: HudSnapshot = {
   flareCooldownSec: 0,
   mouseAimScreenX: 50,
   mouseAimScreenY: 50,
+  aimOnScreen: true,
+  aimEdgeAngleDeg: 0,
+  pointerLocked: false,
   noseScreenX: 50,
   noseScreenY: 50,
   targetScreenX: null,
@@ -211,6 +214,7 @@ export default function App() {
   const [killFeed, setKillFeed] = useState<KillFeedEntry[]>([]);
 
   const bridgeRef = useRef<SimCommandBridge | null>(null);
+  const reticleFrameRef = useRef<HTMLDivElement | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const selfArenaIdRef = useRef<string | null>(null);
   const theaterIdRef = useRef(theaterId);
@@ -770,6 +774,7 @@ export default function App() {
         muted={muted}
         remotePilots={remotePilots}
         bridgeRef={bridgeRef}
+        reticleFrameRef={reticleFrameRef}
         onHudUpdate={setHud}
         onTargetDestroyed={handleTargetDestroyed}
         onAirKill={handleAirKill}
@@ -848,6 +853,7 @@ export default function App() {
           onSelectSlot={(s) => bridgeRef.current?.setActiveSlot(s)}
           onFire={() => bridgeRef.current?.fireActiveOrdnance()}
           onCycleTarget={() => bridgeRef.current?.cycleTarget()}
+          reticleFrameRef={reticleFrameRef}
         />
       )}
 

@@ -473,6 +473,9 @@ export interface HudSnapshot {
   blueTickets: number;
   redTickets: number;
   freeLooking: boolean;
+  pointerLocked: boolean;
+  aimOnScreen: boolean;
+  aimEdgeAngleDeg: number;
   combatHitCallout: string | null;
   airContacts: AirContactHud[];
 }

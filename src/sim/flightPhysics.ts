@@ -75,6 +75,50 @@ export function computeKamikazeImpactPayload(
   };
 }
 
+export const MAX_AIM_PITCH_RAD = 1.28; // +-73.3 deg safe pitch envelope below gimbal lock
+
+export function wrapAngleRad(angle: number): number {
+  let a = angle;
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+}
+
+export function clampAimPitchRad(pitch: number): number {
+  return Math.max(-MAX_AIM_PITCH_RAD, Math.min(MAX_AIM_PITCH_RAD, pitch));
+}
+
+export function aimAnglesToDirection(yaw: number, pitch: number): { x: number; y: number; z: number } {
+  const p = clampAimPitchRad(pitch);
+  const cosP = Math.cos(p);
+  return {
+    x: -Math.sin(yaw) * cosP,
+    y: Math.sin(p),
+    z: -Math.cos(yaw) * cosP,
+  };
+}
+
+export function directionToAimAngles(dir: { x: number; y: number; z: number }): { yaw: number; pitch: number } {
+  const len = Math.max(1e-6, Math.hypot(dir.x, dir.y, dir.z));
+  const nx = dir.x / len;
+  const ny = Math.max(-0.958, Math.min(0.958, dir.y / len));
+  const nz = dir.z / len;
+  return {
+    yaw: wrapAngleRad(Math.atan2(-nx, -nz)),
+    pitch: clampAimPitchRad(Math.asin(ny)),
+  };
+}
+
+export function computeDirectionAngularErrorRad(
+  a: { x: number; y: number; z: number },
+  b: { x: number; y: number; z: number },
+): number {
+  const lenA = Math.max(1e-6, Math.hypot(a.x, a.y, a.z));
+  const lenB = Math.max(1e-6, Math.hypot(b.x, b.y, b.z));
+  const dot = Math.max(-1, Math.min(1, (a.x * b.x + a.y * b.y + a.z * b.z) / (lenA * lenB)));
+  return Math.acos(dot);
+}
+
 export interface InstructorManualOverride {
   pitchOverride: number;
   rollOverride: number;
@@ -82,57 +126,74 @@ export interface InstructorManualOverride {
   throttleDelta: number;
 }
 
+export interface InstructorOptions {
+  autoLevel?: boolean;
+  pitchRateRad?: number;
+  rollRateRad?: number;
+  yawRateRad?: number;
+  handoffBlend?: number; // 0..1 smooth post-manual-override ramp
+  maxBankRad?: number;
+}
+
 /**
- * War Thunder-style Mouse Aim Instructor: converts a desired 3D aim direction vector
- * into smooth bank-into-turn roll, elevator pitch, and coordinated rudder yaw while
- * yielding immediately whenever manual W/S/A/D stick overrides are held.
+ * Stabilized War Thunder-style Mouse Aim Flight Instructor:
+ * Converts a persistent world-space aim direction vector into damped bank-to-turn roll,
+ * pitch elevator, and coordinated rudder yaw. Suspends tracking cleanly during manual
+ * keyboard overrides and blends back smoothly on release without overshoot or oscillation.
  */
 export function computeInstructorControlInput(
   drone: DroneFlightState,
   aimDir: { x: number; y: number; z: number },
   manual: InstructorManualOverride,
-  options: { autoLevel?: boolean } = {},
+  options: InstructorOptions = {},
 ): FlightControlInput {
   const autoLevel = options.autoLevel ?? true;
   const hasManualPitch = Math.abs(manual.pitchOverride) > 0.05;
   const hasManualRoll = Math.abs(manual.rollOverride) > 0.05;
+  const hasManualYaw = Math.abs(manual.yawOverride) > 0.05;
+  const manualActive = hasManualPitch || hasManualRoll || hasManualYaw;
 
-  const aimLen = Math.max(0.0001, Math.hypot(aimDir.x, aimDir.y, aimDir.z));
-  const ax = aimDir.x / aimLen;
-  const ay = Math.max(-0.9, Math.min(0.9, aimDir.y / aimLen));
-  const az = aimDir.z / aimLen;
+  if (manualActive) {
+    return {
+      pitchInput: hasManualPitch ? manual.pitchOverride : 0,
+      rollInput: hasManualRoll ? manual.rollOverride : 0,
+      yawInput: hasManualYaw ? manual.yawOverride : 0,
+      throttleDelta: manual.throttleDelta,
+    };
+  }
 
-  const desiredYaw = Math.atan2(-ax, -az);
-  const desiredPitch = Math.asin(ay);
-
-  // Shortest signed yaw angle in [-PI, PI]
-  let dYaw = desiredYaw - drone.yaw;
-  while (dYaw > Math.PI) dYaw -= Math.PI * 2;
-  while (dYaw < -Math.PI) dYaw += Math.PI * 2;
-
+  const { yaw: desiredYaw, pitch: desiredPitch } = directionToAimAngles(aimDir);
+  const dYaw = wrapAngleRad(desiredYaw - drone.yaw);
   const dPitch = desiredPitch - drone.pitch;
 
-  // Desired bank-into-turn angle (negative yaw error -> positive right-wing-down / vice versa)
-  // Note: in our Three.js convention, +rollInput turns nose left (-roll -> bankRight turns right)
+  const pitchRate = options.pitchRateRad ?? 0;
+  const rollRate = options.rollRateRad ?? 0;
+  const yawRate = options.yawRateRad ?? 0;
+  const maxBankRad = options.maxBankRad ?? 0.96; // ~55 deg realistic UAV bank limit
+  const handoffBlend = Math.max(0, Math.min(1, options.handoffBlend ?? 1));
+
+  // Taper bank-to-turn smoothly toward 0 as dYaw shrinks so micro-aiming never rolls erratically
+  const bankEnvelope = Math.min(1, Math.abs(dYaw) / 0.16);
   let desiredRoll = 0;
-  if (Math.abs(dYaw) > 0.035) {
-    desiredRoll = Math.max(-1.05, Math.min(1.05, dYaw * 2.25));
+  if (Math.abs(dYaw) > 0.015) {
+    desiredRoll = Math.max(-maxBankRad, Math.min(maxBankRad, dYaw * 2.15)) * bankEnvelope;
   } else if (!autoLevel) {
     desiredRoll = drone.roll;
   }
 
   const dRoll = desiredRoll - drone.roll;
-  const instructorRoll = Math.max(-1, Math.min(1, dRoll * 2.4));
-  const instructorYaw = Math.max(-1, Math.min(1, dYaw * 2.1));
-  const instructorPitch = Math.max(
-    -1,
-    Math.min(1, dPitch * 3.1 + Math.min(0.45, Math.abs(dYaw) * 0.65) * Math.abs(Math.sin(drone.roll))),
-  );
+  const instructorRoll = Math.max(-1, Math.min(1, dRoll * 2.55 - rollRate * 0.34)) * handoffBlend;
+  const instructorYaw = Math.max(-1, Math.min(1, dYaw * 2.15 - yawRate * 0.30)) * handoffBlend;
+
+  // Compensate pitch drop slightly during steep banks while damping angular rate
+  const bankLiftComp = Math.min(0.28, Math.abs(dYaw) * 0.45) * Math.abs(Math.sin(drone.roll));
+  const instructorPitch =
+    Math.max(-1, Math.min(1, dPitch * 2.95 - pitchRate * 0.32 + bankLiftComp)) * handoffBlend;
 
   return {
-    pitchInput: hasManualPitch ? manual.pitchOverride : instructorPitch,
-    rollInput: hasManualRoll ? manual.rollOverride : instructorRoll,
-    yawInput: Math.abs(manual.yawOverride) > 0.05 ? manual.yawOverride : instructorYaw,
+    pitchInput: instructorPitch,
+    rollInput: instructorRoll,
+    yawInput: instructorYaw,
     throttleDelta: manual.throttleDelta,
   };
 }
@@ -143,64 +204,45 @@ export interface MouseAimResult {
   targetDir: { x: number; y: number; z: number };
 }
 
+export interface MouseAimStepInput {
+  aimYaw: number;
+  aimPitch: number;
+  aimDeltaYawRad: number;
+  aimDeltaPitchRad: number;
+  manualOverrideActive: boolean;
+  freeLooking: boolean;
+  droneYaw: number;
+  dronePitch: number;
+  scheme: 'mouse_aim' | 'direct_stick';
+}
+
 /**
- * War Thunder continuous spherical Mouse Aim cursor controller:
- * - Cursor deflection from screen center continuously slews desired 3D aim (full 360° yaw, +-75° pitch)
- *   plus fine immediate offset so small aiming adjustments feel razor sharp.
- * - Holding manual W/S/A/D/Q/E yields to stick overrides and syncs aim to current nose so releasing never snaps back.
- * - Holding Free-Look ('C') freezes the aim vector while camera orbits freely around the aircraft.
+ * Persistent World-Space Mouse Aim Updater:
+ * - Only physical mouse angular deltas (aimDeltaYawRad, aimDeltaPitchRad) modify desired aim.
+ * - Zero mouse movement keeps desired world-space aim direction invariant across ticks & cameras.
+ * - Holding manual W/S/A/D/Q/E aligns aim smoothly to aircraft nose so release never snaps back.
+ * - Holding Free-Look ('C') strictly freezes the world-space aim direction.
  */
-export function stepWarThunderAimAngles(
-  aimYaw: number,
-  aimPitch: number,
-  mouseNdcX: number,
-  mouseNdcY: number,
-  manual: { pitchOverride: number; rollOverride: number; yawOverride: number },
-  freeLooking: boolean,
-  droneYaw: number,
-  dronePitch: number,
-  scheme: 'mouse_aim' | 'direct_stick',
-  dt: number,
-): MouseAimResult {
-  const stepDt = Math.min(0.05, Math.max(0.001, dt));
-  let nextYaw = aimYaw;
-  let nextPitch = aimPitch;
+export function stepWarThunderAimAngles(params: MouseAimStepInput): MouseAimResult {
+  let nextYaw = wrapAngleRad(params.aimYaw);
+  let nextPitch = clampAimPitchRad(params.aimPitch);
 
-  const hasManual =
-    Math.abs(manual.pitchOverride) > 0.05 ||
-    Math.abs(manual.rollOverride) > 0.05 ||
-    Math.abs(manual.yawOverride) > 0.05;
-
-  if (scheme !== 'mouse_aim' || hasManual) {
-    nextYaw = droneYaw;
-    nextPitch = dronePitch;
-  } else if (!freeLooking) {
-    const deadzone = 0.035;
-    const mag = Math.hypot(mouseNdcX, mouseNdcY);
-    if (mag > deadzone) {
-      const scaledX = Math.abs(mouseNdcX) > deadzone ? mouseNdcX - Math.sign(mouseNdcX) * deadzone : 0;
-      const scaledY = Math.abs(mouseNdcY) > deadzone ? mouseNdcY - Math.sign(mouseNdcY) * deadzone : 0;
-      // Nonlinear War Thunder slew response: delicate precision near center, crisp turn rate at edge
-      const yawSlew = -Math.sign(scaledX) * Math.pow(Math.min(1, Math.abs(scaledX)), 1.25) * 1.9;
-      const pitchSlew = Math.sign(scaledY) * Math.pow(Math.min(1, Math.abs(scaledY)), 1.25) * 1.45;
-      nextYaw += yawSlew * stepDt;
-      nextPitch = Math.max(-1.22, Math.min(1.22, nextPitch + pitchSlew * stepDt));
+  if (params.scheme !== 'mouse_aim' || params.manualOverrideActive) {
+    nextYaw = wrapAngleRad(params.droneYaw);
+    nextPitch = clampAimPitchRad(params.dronePitch);
+  } else if (!params.freeLooking) {
+    const dy = Number.isFinite(params.aimDeltaYawRad) ? params.aimDeltaYawRad : 0;
+    const dp = Number.isFinite(params.aimDeltaPitchRad) ? params.aimDeltaPitchRad : 0;
+    if (dy !== 0 || dp !== 0) {
+      nextYaw = wrapAngleRad(nextYaw + dy);
+      nextPitch = clampAimPitchRad(nextPitch + dp);
     }
   }
 
-  // Normalize aimYaw to [-PI, PI]
-  while (nextYaw > Math.PI) nextYaw -= Math.PI * 2;
-  while (nextYaw < -Math.PI) nextYaw += Math.PI * 2;
-
-  const cosP = Math.cos(nextPitch);
   return {
     aimYaw: nextYaw,
     aimPitch: nextPitch,
-    targetDir: {
-      x: -Math.sin(nextYaw) * cosP,
-      y: Math.sin(nextPitch),
-      z: -Math.cos(nextYaw) * cosP,
-    },
+    targetDir: aimAnglesToDirection(nextYaw, nextPitch),
   };
 }
 
@@ -293,20 +335,20 @@ export function stepDroneFlight(
 
   roll += (input.rollInput * airframe.maxRollRateRad * authority + turbRoll) * simDt;
   // Auto-level gently when no roll input is held
-  if (Math.abs(input.rollInput) < 0.05) {
+  if (Math.abs(input.rollInput) < 0.02) {
     roll *= Math.exp(-(isArcade ? 2.1 : 1.25) * simDt);
   }
   roll = Math.max(-Math.PI * 0.72, Math.min(Math.PI * 0.72, roll));
 
   pitch += (input.pitchInput * airframe.maxPitchRateRad * authority + turbPitch) * simDt;
-  if (Math.abs(input.pitchInput) < 0.05) {
-    pitch *= Math.exp(-(isArcade ? 0.45 : 0.32) * simDt);
+  if (Math.abs(input.pitchInput) < 0.012) {
+    pitch *= Math.exp(-(isArcade ? 0.16 : 0.12) * simDt);
   }
   pitch = Math.max(-Math.PI * 0.45, Math.min(Math.PI * 0.45, pitch));
 
-  // Coordinated bank-to-turn + rudder yaw
-  const bankTurnRate = Math.sin(roll) * (atmos.localGravityMs2 / Math.max(35, airspeedMs)) * (isArcade ? 2.85 : 2.35);
-  yaw += (input.yawInput * airframe.maxYawRateRad * authority - bankTurnRate) * simDt;
+  // Coordinated bank-to-turn + rudder yaw (+roll = left wing down => turns left / +yaw)
+  const bankTurnRate = Math.sin(roll) * (atmos.localGravityMs2 / Math.max(35, airspeedMs)) * (isArcade ? 2.45 : 1.95);
+  yaw = wrapAngleRad(yaw + (input.yawInput * airframe.maxYawRateRad * authority + bankTurnRate) * simDt);
 
   // Forward unit vector in Three.js space (+X East, +Y Up, -Z North)
   const cosP = Math.cos(pitch);
@@ -314,9 +356,9 @@ export function stepDroneFlight(
   const fwdY = Math.sin(pitch);
   const fwdZ = -Math.cos(yaw) * cosP;
 
-  // Wing up vector rotated by roll around forward axis
+  // Starboard unit vector (fwd x worldUp = (cos(yaw), 0, -sin(yaw))) and wing-normal lift vector
   const rightX = Math.cos(yaw);
-  const rightZ = Math.sin(yaw);
+  const rightZ = -Math.sin(yaw);
   const sinR = Math.sin(roll);
   const cosR = Math.cos(roll);
 
@@ -324,9 +366,9 @@ export function stepDroneFlight(
   const upBaseY = Math.cos(pitch);
   const upBaseZ = Math.cos(yaw) * Math.sin(pitch);
 
-  const wingUpX = upBaseX * cosR + rightX * sinR;
+  const wingUpX = upBaseX * cosR - rightX * sinR;
   const wingUpY = upBaseY * cosR;
-  const wingUpZ = upBaseZ * cosR + rightZ * sinR;
+  const wingUpZ = upBaseZ * cosR - rightZ * sinR;
 
   // Angle of attack (AoA) between relative airspeed and body forward vector
   const dirX = vRelX / airspeedMs;

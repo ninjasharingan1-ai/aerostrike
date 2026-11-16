@@ -16,16 +16,20 @@ import {
   createFixedClock,
   FIXED_TIMESTEP_SEC,
   FixedClockState,
+  MAX_SUBSTEPS_PER_FRAME,
 } from '../clock/fixedClock';
 import { SeededRng } from '../clock/seededRng';
 import { CYBER_PAYLOADS } from '../cyberWarfare';
 import {
+  aimAnglesToDirection,
+  computeDirectionAngularErrorRad,
   computeInstructorControlInput,
   computeKamikazeImpactPayload,
   predictOrdnanceTrajectory,
   stepDroneFlight,
   stepOrdnance,
   stepWarThunderAimAngles,
+  wrapAngleRad,
 } from '../flightPhysics';
 import { groundHeightAt, THEATERS } from '../geoTheaters';
 import { INITIAL_PROGRESSION, computePilotSkillBonuses } from '../progression';
@@ -52,13 +56,13 @@ export interface SimStepInput {
   rollOverride: number;
   yawOverride: number;
   throttleDelta: number;
-  mouseNdcX: number;
-  mouseNdcY: number;
-  mouseSensitivity: number;
-  invertY: boolean;
+  aimDeltaYawRad: number;
+  aimDeltaPitchRad: number;
+  aimSmoothing?: number;
   freeLooking: boolean;
   firingHeld: boolean;
   cameraOrbitMode: boolean;
+  cameraEoirMode?: boolean;
 }
 
 export interface SimWorldConfig {
@@ -253,6 +257,23 @@ export class SimWorld {
 
   public aimYaw = 0;
   public aimPitch = 0.02;
+  public desiredAimDir: { x: number; y: number; z: number } = aimAnglesToDirection(0, 0.02);
+
+  private pendingAimDeltaYawRad = 0;
+  private pendingAimDeltaPitchRad = 0;
+  private queuedAimDeltaYawRad = 0;
+  private queuedAimDeltaPitchRad = 0;
+  private substepAimDeltaYawRad = 0;
+  private substepAimDeltaPitchRad = 0;
+  private prevDroneYaw = 0;
+  private prevDronePitch = 0.02;
+  private prevDroneRoll = 0;
+  private estYawRateRad = 0;
+  private estPitchRateRad = 0;
+  private estRollRateRad = 0;
+  public manualOverrideActive = false;
+  public manualHandoffBlend = 1;
+  public lastInstructorCmd = { pitch: 0, roll: 0, yaw: 0 };
 
   public score = 0;
   public bestCep: number | null = null;
@@ -415,8 +436,7 @@ export class SimWorld {
     this.ticketBleedTimer = 4.0;
     this.combatHitCallout = null;
     this.combatHitUntil = 0;
-    this.aimYaw = 0;
-    this.aimPitch = 0.02;
+    this.syncAimStateToDrone();
     this.wingVortexTimer = 0;
     this.lockedTargetId = this.landmarks[0]?.id ?? null;
     this.customWaypoint = null;
@@ -478,6 +498,60 @@ export class SimWorld {
     }
 
     return { events: this.drainEvents(), loadoutChanged };
+  }
+
+  public clearPendingAimDeltas(): void {
+    this.pendingAimDeltaYawRad = 0;
+    this.pendingAimDeltaPitchRad = 0;
+    this.queuedAimDeltaYawRad = 0;
+    this.queuedAimDeltaPitchRad = 0;
+    this.substepAimDeltaYawRad = 0;
+    this.substepAimDeltaPitchRad = 0;
+  }
+
+  private syncAimStateToDrone(): void {
+    this.aimYaw = this.drone.yaw;
+    this.aimPitch = this.drone.pitch;
+    this.desiredAimDir = aimAnglesToDirection(this.aimYaw, this.aimPitch);
+    this.prevDroneYaw = this.drone.yaw;
+    this.prevDronePitch = this.drone.pitch;
+    this.prevDroneRoll = this.drone.roll;
+    this.estYawRateRad = 0;
+    this.estPitchRateRad = 0;
+    this.estRollRateRad = 0;
+    this.manualOverrideActive = false;
+    this.manualHandoffBlend = 1;
+    this.lastInstructorCmd = { pitch: 0, roll: 0, yaw: 0 };
+    this.clearPendingAimDeltas();
+  }
+
+  public getDesiredAimDirection(): { x: number; y: number; z: number } {
+    return { ...this.desiredAimDir };
+  }
+
+  public getAimTelemetry() {
+    const noseDir = aimAnglesToDirection(this.drone.yaw, this.drone.pitch);
+    const angularErrorRad = computeDirectionAngularErrorRad(this.desiredAimDir, noseDir);
+    return {
+      desiredAimYawRad: Number(this.aimYaw.toFixed(4)),
+      desiredAimPitchRad: Number(this.aimPitch.toFixed(4)),
+      desiredAimDir: {
+        x: Number(this.desiredAimDir.x.toFixed(4)),
+        y: Number(this.desiredAimDir.y.toFixed(4)),
+        z: Number(this.desiredAimDir.z.toFixed(4)),
+      },
+      aircraftYawRad: Number(this.drone.yaw.toFixed(4)),
+      aircraftPitchRad: Number(this.drone.pitch.toFixed(4)),
+      aircraftRollRad: Number(this.drone.roll.toFixed(4)),
+      angularErrorDeg: Number(((angularErrorRad * 180) / Math.PI).toFixed(2)),
+      instructorCmd: {
+        pitch: Number(this.lastInstructorCmd.pitch.toFixed(3)),
+        roll: Number(this.lastInstructorCmd.roll.toFixed(3)),
+        yaw: Number(this.lastInstructorCmd.yaw.toFixed(3)),
+      },
+      manualOverrideActive: this.manualOverrideActive,
+      manualHandoffBlend: Number(this.manualHandoffBlend.toFixed(2)),
+    };
   }
 
   public setActiveSlot(slot: number): void {
@@ -1205,8 +1279,7 @@ export class SimWorld {
         this.config.loadout.airframeId,
         this.config.skillBonuses,
       );
-      this.aimYaw = this.drone.yaw;
-      this.aimPitch = this.drone.pitch;
+      this.syncAimStateToDrone();
       const slots = this.config.loadout.slots;
       this.slotAmmo = [
         WEAPONS[slots[0]].ammoPerSlot,
@@ -1293,44 +1366,82 @@ export class SimWorld {
         ? Math.sin(sortieTimeSec * 9.5) * 0.45
         : 0;
 
-    const effNdcX = Math.max(-0.98, Math.min(0.98, input.mouseNdcX * input.mouseSensitivity));
-    const effNdcY = Math.max(
-      -0.94,
-      Math.min(0.94, (input.invertY ? -input.mouseNdcY : input.mouseNdcY) * input.mouseSensitivity),
-    );
     const effRollOverride = Math.max(-1, Math.min(1, input.rollOverride + cyberRollJitter));
+    const manualOverrideActive =
+      Math.abs(input.pitchOverride) > 0.05 ||
+      Math.abs(effRollOverride) > 0.05 ||
+      Math.abs(input.yawOverride) > 0.05;
 
-    const aimStep = stepWarThunderAimAngles(
-      this.aimYaw,
-      this.aimPitch,
-      effNdcX,
-      effNdcY,
-      {
-        pitchOverride: input.pitchOverride,
-        rollOverride: effRollOverride,
-        yawOverride: input.yawOverride,
-      },
-      input.freeLooking,
-      this.drone.yaw,
-      this.drone.pitch,
-      this.config.controlScheme,
-      dt,
-    );
+    if (manualOverrideActive) {
+      this.manualOverrideActive = true;
+      this.manualHandoffBlend = 0;
+      this.queuedAimDeltaYawRad = 0;
+      this.queuedAimDeltaPitchRad = 0;
+    } else {
+      if (this.manualOverrideActive) {
+        this.manualOverrideActive = false;
+        this.manualHandoffBlend = 0;
+      } else {
+        this.manualHandoffBlend = Math.min(1, this.manualHandoffBlend + dt / 0.35);
+      }
+    }
+
+    const aimSmoothing = Math.max(0, Math.min(1, input.aimSmoothing ?? 0));
+    let appliedStepYawDelta = this.substepAimDeltaYawRad;
+    let appliedStepPitchDelta = this.substepAimDeltaPitchRad;
+
+    if (aimSmoothing > 0.01 && this.config.controlScheme === 'mouse_aim' && !input.freeLooking && !manualOverrideActive) {
+      this.queuedAimDeltaYawRad += this.substepAimDeltaYawRad;
+      this.queuedAimDeltaPitchRad += this.substepAimDeltaPitchRad;
+      const smoothHz = 36 - aimSmoothing * 26; // 36 Hz -> 10 Hz responsive exponential smoothing
+      const alpha = 1 - Math.exp(-smoothHz * dt);
+      appliedStepYawDelta = this.queuedAimDeltaYawRad * alpha;
+      appliedStepPitchDelta = this.queuedAimDeltaPitchRad * alpha;
+      this.queuedAimDeltaYawRad -= appliedStepYawDelta;
+      this.queuedAimDeltaPitchRad -= appliedStepPitchDelta;
+    } else if (this.queuedAimDeltaYawRad !== 0 || this.queuedAimDeltaPitchRad !== 0) {
+      appliedStepYawDelta += this.queuedAimDeltaYawRad;
+      appliedStepPitchDelta += this.queuedAimDeltaPitchRad;
+      this.queuedAimDeltaYawRad = 0;
+      this.queuedAimDeltaPitchRad = 0;
+    }
+
+    const aimStep = stepWarThunderAimAngles({
+      aimYaw: this.aimYaw,
+      aimPitch: this.aimPitch,
+      aimDeltaYawRad: appliedStepYawDelta,
+      aimDeltaPitchRad: appliedStepPitchDelta,
+      manualOverrideActive,
+      freeLooking: input.freeLooking,
+      droneYaw: this.drone.yaw,
+      dronePitch: this.drone.pitch,
+      scheme: this.config.controlScheme,
+    });
     this.aimYaw = aimStep.aimYaw;
     this.aimPitch = aimStep.aimPitch;
+    this.desiredAimDir = aimStep.targetDir;
 
     let flightControlInput;
     if (this.config.controlScheme === 'mouse_aim' && !input.cameraOrbitMode) {
+      const afSpec = AIRFRAMES[this.config.loadout.airframeId];
+      const maxBankRad = afSpec.maxRollRateRad > 1.8 ? 1.08 : 0.94;
       flightControlInput = computeInstructorControlInput(
         this.drone,
-        aimStep.targetDir,
+        this.desiredAimDir,
         {
           pitchOverride: input.pitchOverride,
           rollOverride: effRollOverride,
           yawOverride: input.yawOverride,
           throttleDelta: input.throttleDelta,
         },
-        { autoLevel: this.config.instructorAutoLevel },
+        {
+          autoLevel: this.config.instructorAutoLevel,
+          pitchRateRad: this.estPitchRateRad,
+          rollRateRad: this.estRollRateRad,
+          yawRateRad: this.estYawRateRad,
+          handoffBlend: this.manualHandoffBlend,
+          maxBankRad,
+        },
       );
       if (Math.abs(cyberRollJitter) > 0.01) {
         flightControlInput.rollInput = Math.max(-1, Math.min(1, flightControlInput.rollInput + cyberRollJitter));
@@ -1344,6 +1455,12 @@ export class SimWorld {
       };
     }
 
+    this.lastInstructorCmd = {
+      pitch: flightControlInput.pitchInput,
+      roll: flightControlInput.rollInput,
+      yaw: flightControlInput.yawInput,
+    };
+
     let ordnanceMassKg = 0;
     for (let i = 0; i < 4; i++) {
       const w = WEAPONS[this.config.loadout.slots[i]];
@@ -1352,6 +1469,10 @@ export class SimWorld {
           ? (this.slotAmmo[i] > 0 ? w.massKg : 0) + this.slotAmmo[i] * 0.16
           : w.massKg * this.slotAmmo[i];
     }
+
+    this.prevDroneYaw = this.drone.yaw;
+    this.prevDronePitch = this.drone.pitch;
+    this.prevDroneRoll = this.drone.roll;
 
     this.drone = stepDroneFlight(
       this.drone,
@@ -1372,6 +1493,14 @@ export class SimWorld {
       dt,
     );
 
+    const instYawRate = wrapAngleRad(this.drone.yaw - this.prevDroneYaw) / Math.max(1e-4, dt);
+    const instPitchRate = (this.drone.pitch - this.prevDronePitch) / Math.max(1e-4, dt);
+    const instRollRate = (this.drone.roll - this.prevDroneRoll) / Math.max(1e-4, dt);
+    const rateAlpha = 1 - Math.exp(-22 * dt);
+    this.estYawRateRad += (instYawRate - this.estYawRateRad) * rateAlpha;
+    this.estPitchRateRad += (instPitchRate - this.estPitchRateRad) * rateAlpha;
+    this.estRollRateRad += (instRollRate - this.estRollRateRad) * rateAlpha;
+
     // Wingtip G-vortex vapor trails during tight pulls
     this.wingVortexTimer -= dt;
     if (Math.abs(this.drone.gLoad) > 2.2 && this.drone.airspeedMs > 68 && this.wingVortexTimer <= 0) {
@@ -1379,7 +1508,7 @@ export class SimWorld {
       const halfSpan = AIRFRAMES[this.config.loadout.airframeId].wingspanM * 0.42;
       const rightX = Math.cos(this.drone.yaw) * Math.cos(this.drone.roll);
       const rightY = Math.sin(this.drone.roll);
-      const rightZ = Math.sin(this.drone.yaw) * Math.cos(this.drone.roll);
+      const rightZ = -Math.sin(this.drone.yaw) * Math.cos(this.drone.roll);
       for (const side of [-1, 1]) {
         this.emit({
           type: 'particle_burst',
@@ -2022,8 +2151,7 @@ export class SimWorld {
         this.config.loadout.airframeId,
         this.config.skillBonuses,
       );
-      this.aimYaw = this.drone.yaw;
-      this.aimPitch = this.drone.pitch;
+      this.syncAimStateToDrone();
       this.emitAar('damage', 'Airframe Shot Down', `Redeploying reserve drone (${this.reserveDrones}/3 remaining)`);
     }
 
@@ -2069,6 +2197,50 @@ export class SimWorld {
     }
 
     const simPaused = !isPlaying || this.hitstopTimer > 0;
+    const canAcceptAimDeltas =
+      !simPaused &&
+      this.config.controlScheme === 'mouse_aim' &&
+      !input.freeLooking &&
+      !input.cameraOrbitMode &&
+      !input.cameraEoirMode;
+
+    if (!isPlaying) {
+      this.clearPendingAimDeltas();
+    } else if (canAcceptAimDeltas) {
+      if (Number.isFinite(input.aimDeltaYawRad)) {
+        this.pendingAimDeltaYawRad += input.aimDeltaYawRad;
+      }
+      if (Number.isFinite(input.aimDeltaPitchRad)) {
+        this.pendingAimDeltaPitchRad += input.aimDeltaPitchRad;
+      }
+    }
+
+    if (!simPaused) {
+      const clampedScale = Number.isFinite(this.config.sandbox.timeScale)
+        ? Math.max(0.05, Math.min(4.0, this.config.sandbox.timeScale))
+        : 1.0;
+      const projectedAccum = Math.min(
+        MAX_SUBSTEPS_PER_FRAME * FIXED_TIMESTEP_SEC,
+        this.clock.accumulatorSec + safeRawDt * clampedScale,
+      );
+      const plannedSubsteps = Math.min(
+        MAX_SUBSTEPS_PER_FRAME,
+        Math.floor((projectedAccum + 1e-11) / FIXED_TIMESTEP_SEC),
+      );
+      if (plannedSubsteps > 0) {
+        this.substepAimDeltaYawRad = this.pendingAimDeltaYawRad / plannedSubsteps;
+        this.substepAimDeltaPitchRad = this.pendingAimDeltaPitchRad / plannedSubsteps;
+        this.pendingAimDeltaYawRad = 0;
+        this.pendingAimDeltaPitchRad = 0;
+      } else {
+        this.substepAimDeltaYawRad = 0;
+        this.substepAimDeltaPitchRad = 0;
+      }
+    } else {
+      this.substepAimDeltaYawRad = 0;
+      this.substepAimDeltaPitchRad = 0;
+    }
+
     advanceFixedClock(
       this.clock,
       safeRawDt,

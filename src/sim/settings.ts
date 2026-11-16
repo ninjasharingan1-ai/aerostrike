@@ -14,7 +14,9 @@ export interface GraphicsSettings {
 
 export interface ControlSettings {
   scheme: ControlScheme;
-  mouseSensitivity: number; // 0.4 .. 2.2
+  mouseSensitivity: number; // 0.2 .. 3.0 (Mouse Aim sensitivity)
+  freeLookSensitivity: number; // 0.2 .. 3.0 (Hold C Free-Look sensitivity)
+  aimSmoothing: number; // 0.0 .. 1.0 (0 = raw 1:1 immediate aim, higher = smoothed slew)
   invertY: boolean;
   instructorAutoLevel: boolean;
 }
@@ -74,6 +76,8 @@ export const DEFAULT_SETTINGS: GameSettings = {
   controls: {
     scheme: 'mouse_aim',
     mouseSensitivity: 1.0,
+    freeLookSensitivity: 1.0,
+    aimSmoothing: 0.0,
     invertY: false,
     instructorAutoLevel: true,
   },

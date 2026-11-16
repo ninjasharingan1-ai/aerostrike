@@ -4,8 +4,20 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { AIRFRAMES, WEAPONS } from '../sim/arsenalData';
 import { AarEventType } from '../sim/aarLogger';
-import { computeLeadPoint } from '../sim/flightPhysics';
+import { computeLeadPoint, aimAnglesToDirection, clampAimPitchRad, wrapAngleRad } from '../sim/flightPhysics';
 import { groundHeightAt } from '../sim/geoTheaters';
+import {
+  clearMousePendingDeltas,
+  consumeMouseFrameInput,
+  createMouseInputState,
+  handleMouseFocusLoss,
+  handleMousePointerEnter,
+  handleMousePointerLeave,
+  handleMousePointerLockChange,
+  handleMousePointerLockError,
+  handleMousePointerMove,
+  PointerRoute,
+} from '../sim/mouseAimInput';
 import { GameSettings } from '../sim/settings';
 import { SimEvent, SimWorld, SimWorldConfig } from '../sim/core/simWorld';
 import {
@@ -82,6 +94,7 @@ interface FlightViewportProps {
   muted: boolean;
   remotePilots: RemotePilotState[];
   bridgeRef: React.MutableRefObject<SimCommandBridge | null>;
+  reticleFrameRef?: React.MutableRefObject<HTMLDivElement | null>;
   onHudUpdate: (snapshot: HudSnapshot) => void;
   onTargetDestroyed: (info: { targetId: string; name: string; points: number; cepMeters: number; weaponId: WeaponId }) => void;
   onAirKill: (info: { victimName: string; points: number; weaponId: WeaponId }) => void;
@@ -547,12 +560,22 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     let orbitYawOffset = 0;
     let freeLookYawOffset = 0;
     let freeLookPitchOffset = 0;
+    let eoirYawOffset = 0;
+    let eoirPitchOffset = 0;
+    let camYaw = world.aimYaw;
+    let camPitch = clampAimPitchRad(world.aimPitch * 0.72);
     let flybyAnchor: THREE.Vector3 | null = null;
     let prevCamMode: CameraMode = propsRef.current.cameraMode;
-    let lastPointerX: number | null = null;
-    let lastPointerY: number | null = null;
-    let mouseNdcX = 0;
-    let mouseNdcY = 0;
+    let prevPhase: GamePhase = propsRef.current.phase;
+    const mouseInput = createMouseInputState();
+    let pointerLockRejected = false;
+    let lastMouseAimScreen = { x: 50, y: 50, onScreen: true, edgeAngleDeg: 0 };
+    let lastDebugSample = {
+      rawDeltaX: 0,
+      rawDeltaY: 0,
+      appliedAimSensitivity: propsRef.current.settings.controls.mouseSensitivity,
+      appliedFreeLookSensitivity: propsRef.current.settings.controls.freeLookSensitivity,
+    };
     let zoomHeld = false;
     let zoomToggled = false;
     let hdriOwned = false;
@@ -766,16 +789,106 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       keys.clear();
       mouseFireHeld = false;
       zoomHeld = false;
-      lastPointerX = null;
-      lastPointerY = null;
+      handleMouseFocusLoss(mouseInput);
+      world.clearPendingAimDeltas();
+    };
+
+    const releasePointerLock = () => {
+      if (document.pointerLockElement === renderer.domElement) {
+        try {
+          document.exitPointerLock?.();
+        } catch {
+          // Ignore exitPointerLock errors in sandboxed iframes
+        }
+      }
+      if (mouseInput.pointerLocked) {
+        handleMousePointerLockChange(mouseInput, false);
+      }
+    };
+
+    const getPointerRoute = (): PointerRoute => {
+      const p = propsRef.current;
+      if (p.phase !== 'playing') return 'none';
+      if (p.cameraMode === 'eoir') return 'eoir';
+      if (keys.has('KeyC') && p.cameraMode !== 'orbit') return 'freelook';
+      if (p.cameraMode === 'chase' && p.settings.controls.scheme === 'mouse_aim') return 'aim';
+      return 'none';
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        releasePointerLock();
+        clearInputs();
+      } else {
+        clearMousePendingDeltas(mouseInput, true);
+        world.clearPendingAimDeltas();
+      }
+    };
+
+    const handleWindowBlur = () => {
+      releasePointerLock();
+      clearInputs();
+    };
+
+    const handlePointerLockChange = () => {
+      const isLocked = document.pointerLockElement === renderer.domElement;
+      handleMousePointerLockChange(mouseInput, isLocked);
+      if (isLocked) {
+        pointerLockRejected = false;
+      }
+      world.clearPendingAimDeltas();
+      hudEmitAccum = 0.1;
+    };
+
+    const handlePointerLockError = () => {
+      pointerLockRejected = true;
+      handleMousePointerLockError(mouseInput);
+      world.clearPendingAimDeltas();
+      hudEmitAccum = 0.1;
+    };
+
+    const handleCanvasPointerEnter = (e: PointerEvent) => {
+      handleMousePointerEnter(mouseInput, e.clientX, e.clientY);
+    };
+
+    const handleCanvasPointerLeave = () => {
+      handleMousePointerLeave(mouseInput);
+      world.clearPendingAimDeltas();
     };
 
     const handleCanvasPointerDown = (e: PointerEvent) => {
       audio.warmUp();
-      if (propsRef.current.phase !== 'playing') return;
+      const p = propsRef.current;
+      if (p.phase !== 'playing') return;
+
+      if (
+        e.button === 0 &&
+        p.settings.controls.scheme === 'mouse_aim' &&
+        p.cameraMode === 'chase' &&
+        !mouseInput.pointerLocked &&
+        !pointerLockRejected &&
+        typeof renderer.domElement.requestPointerLock === 'function'
+      ) {
+        handleMousePointerEnter(mouseInput, e.clientX, e.clientY);
+        try {
+          const lockResult = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
+          if (lockResult && typeof lockResult.catch === 'function') {
+            lockResult.catch(() => {
+              pointerLockRejected = true;
+              handleMousePointerLockError(mouseInput);
+            });
+          }
+        } catch {
+          pointerLockRejected = true;
+          handleMousePointerLockError(mouseInput);
+        }
+        hudEmitAccum = 0.1;
+        return;
+      }
+
       if (e.button === 0) {
         mouseFireHeld = true;
-        const res = world.fireActiveOrdnance(true, propsRef.current.remotePilots);
+        const res = world.fireActiveOrdnance(true, p.remotePilots);
         dispatchSimEvents(res.events);
         if (res.fired) hudEmitAccum = 0.1;
       } else if (e.button === 2) {
@@ -796,23 +909,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
     const handleCanvasPointerMove = (e: PointerEvent) => {
       if (propsRef.current.phase !== 'playing') return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const sens = propsRef.current.settings.controls.mouseSensitivity;
-
-      if (keys.has('KeyC')) {
-        const dx = e.movementX !== 0 ? e.movementX : lastPointerX !== null ? e.clientX - lastPointerX : 0;
-        const dy = e.movementY !== 0 ? e.movementY : lastPointerY !== null ? e.clientY - lastPointerY : 0;
-        freeLookYawOffset = Math.max(-Math.PI, Math.min(Math.PI, freeLookYawOffset - dx * 0.0055 * sens));
-        freeLookPitchOffset = Math.max(-0.75, Math.min(0.95, freeLookPitchOffset + dy * 0.0045 * sens));
-      } else {
-        const rawX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-        const rawY = -(((e.clientY - rect.top) / rect.height) * 2 - 1);
-        mouseNdcX = Math.max(-1, Math.min(1, rawX * sens));
-        mouseNdcY = Math.max(-1, Math.min(1, rawY * sens));
-      }
-      lastPointerX = e.clientX;
-      lastPointerY = e.clientY;
+      handleMousePointerMove(mouseInput, e, getPointerRoute());
     };
 
     const handleCanvasWheel = (e: WheelEvent) => {
@@ -827,8 +924,12 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
-    window.addEventListener('blur', clearInputs);
-    document.addEventListener('visibilitychange', clearInputs);
+    window.addEventListener('blur', handleWindowBlur);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('pointerlockchange', handlePointerLockChange);
+    document.addEventListener('pointerlockerror', handlePointerLockError);
+    renderer.domElement.addEventListener('pointerenter', handleCanvasPointerEnter);
+    renderer.domElement.addEventListener('pointerleave', handleCanvasPointerLeave);
     renderer.domElement.addEventListener('pointerdown', handleCanvasPointerDown);
     renderer.domElement.addEventListener('pointermove', handleCanvasPointerMove);
     renderer.domElement.addEventListener('wheel', handleCanvasWheel, { passive: false });
@@ -841,10 +942,12 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         dispatchSimEvents(world.resetSortie(nextTheaterId ?? propsRef.current.theaterId));
         freeLookYawOffset = 0;
         freeLookPitchOffset = 0;
-        lastPointerX = null;
-        lastPointerY = null;
-        mouseNdcX = 0;
-        mouseNdcY = 0;
+        eoirYawOffset = 0;
+        eoirPitchOffset = 0;
+        camYaw = world.aimYaw;
+        camPitch = clampAimPitchRad(world.aimPitch * 0.72);
+        clearMousePendingDeltas(mouseInput, true);
+        world.clearPendingAimDeltas();
         zoomHeld = false;
         zoomToggled = false;
         hudEmitAccum = 0.1;
@@ -958,6 +1061,25 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           theaterName: theater.name,
           landmarkNames: world.landmarks.map((l) => l.name),
           lastVfxEvent,
+          mouseAim: {
+            ...world.getAimTelemetry(),
+            scheme: propsRef.current.settings.controls.scheme,
+            pointerLocked: mouseInput.pointerLocked,
+            pointerInside: mouseInput.pointerInside,
+            pointerLockRejected,
+            freeLooking: keys.has('KeyC') && propsRef.current.cameraMode !== 'orbit',
+            rawDeltaX: lastDebugSample.rawDeltaX,
+            rawDeltaY: lastDebugSample.rawDeltaY,
+            appliedAimSensitivity: lastDebugSample.appliedAimSensitivity,
+            appliedFreeLookSensitivity: lastDebugSample.appliedFreeLookSensitivity,
+            aimScreenX: Number(lastMouseAimScreen.x.toFixed(2)),
+            aimScreenY: Number(lastMouseAimScreen.y.toFixed(2)),
+            aimOnScreen: lastMouseAimScreen.onScreen,
+            freeLookYawOffset: Number(freeLookYawOffset.toFixed(4)),
+            freeLookPitchOffset: Number(freeLookPitchOffset.toFixed(4)),
+            substepsLastFrame: world.clock.lastSubsteps,
+            simTickCount: world.clock.tickCount,
+          },
         };
       },
       runResourceSwapAudit: () => {
@@ -1062,6 +1184,36 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         );
       }
 
+      // Phase & Camera-Mode Lifecycle (release pointer lock & purge stale mouse deltas on pause/modals/switch)
+      if (p.phase !== prevPhase) {
+        prevPhase = p.phase;
+        if (p.phase !== 'playing') {
+          releasePointerLock();
+          keys.clear();
+          mouseFireHeld = false;
+          zoomHeld = false;
+          handleMouseFocusLoss(mouseInput);
+          world.clearPendingAimDeltas();
+        } else {
+          clearMousePendingDeltas(mouseInput, true);
+          world.clearPendingAimDeltas();
+        }
+      }
+
+      if (p.cameraMode !== prevCamMode) {
+        prevCamMode = p.cameraMode;
+        clearMousePendingDeltas(mouseInput, true);
+        world.clearPendingAimDeltas();
+        if (p.cameraMode !== 'flyby') flybyAnchor = null;
+        if (p.cameraMode !== 'chase' && mouseInput.pointerLocked) {
+          releasePointerLock();
+        }
+        if (p.cameraMode === 'chase') {
+          camYaw = world.aimYaw;
+          camPitch = clampAimPitchRad(world.aimPitch * 0.72);
+        }
+      }
+
       // Gather player control inputs & advance fixed-timestep SimWorld
       const invertSign = p.settings.controls.invertY ? -1 : 1;
       const pitchOverride =
@@ -1075,21 +1227,53 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       const throttleDelta =
         (keys.has('ShiftLeft') || keys.has('ShiftRight') || keys.has('Equal') ? 1 : 0) -
         (keys.has('ControlLeft') || keys.has('Minus') ? 1 : 0);
-      const freeLookingInput = keys.has('KeyC') && p.cameraMode !== 'orbit';
+      const freeLookingInput = p.phase === 'playing' && keys.has('KeyC') && p.cameraMode !== 'orbit';
 
-      lastRollInput = THREE.MathUtils.damp(
-        lastRollInput,
-        Math.abs(rollOverride) > 0.05 ? rollOverride : -Math.max(-1, Math.min(1, mouseNdcX * 1.4)),
-        10,
-        visualDt,
-      );
-      lastPitchInput = THREE.MathUtils.damp(
-        lastPitchInput,
-        Math.abs(pitchOverride) > 0.05 ? pitchOverride : Math.max(-1, Math.min(1, mouseNdcY * 1.2)),
-        10,
-        visualDt,
-      );
-      lastYawInput = THREE.MathUtils.damp(lastYawInput, yawOverride, 10, visualDt);
+      const consumedMouse = consumeMouseFrameInput(mouseInput, {
+        aimSensitivity: p.settings.controls.mouseSensitivity,
+        freeLookSensitivity: p.settings.controls.freeLookSensitivity,
+        invertY: p.settings.controls.invertY,
+        aimSmoothing: p.settings.controls.aimSmoothing,
+      });
+
+      if (p.phase === 'playing') {
+        lastDebugSample = {
+          rawDeltaX: consumedMouse.rawDeltaX,
+          rawDeltaY: consumedMouse.rawDeltaY,
+          appliedAimSensitivity: consumedMouse.appliedAimSensitivity,
+          appliedFreeLookSensitivity: consumedMouse.appliedFreeLookSensitivity,
+        };
+      }
+
+      if (freeLookingInput) {
+        freeLookYawOffset = Math.max(
+          -Math.PI,
+          Math.min(Math.PI, freeLookYawOffset + consumedMouse.freeLookDeltaYawRad),
+        );
+        freeLookPitchOffset = Math.max(
+          -0.85,
+          Math.min(0.95, freeLookPitchOffset + consumedMouse.freeLookDeltaPitchRad),
+        );
+      } else {
+        freeLookYawOffset = THREE.MathUtils.damp(freeLookYawOffset, 0, 14, visualDt);
+        freeLookPitchOffset = THREE.MathUtils.damp(freeLookPitchOffset, 0, 14, visualDt);
+        if (Math.abs(freeLookYawOffset) < 1e-4) freeLookYawOffset = 0;
+        if (Math.abs(freeLookPitchOffset) < 1e-4) freeLookPitchOffset = 0;
+      }
+
+      if (p.phase === 'playing' && p.cameraMode === 'eoir') {
+        eoirYawOffset = Math.max(
+          -Math.PI * 0.85,
+          Math.min(Math.PI * 0.85, eoirYawOffset + consumedMouse.eoirDeltaYawRad),
+        );
+        eoirPitchOffset = Math.max(
+          -1.05,
+          Math.min(0.35, eoirPitchOffset + consumedMouse.eoirDeltaPitchRad),
+        );
+      } else {
+        eoirYawOffset = THREE.MathUtils.damp(eoirYawOffset, 0, 10, visualDt);
+        eoirPitchOffset = THREE.MathUtils.damp(eoirPitchOffset, 0, 10, visualDt);
+      }
 
       const stepOut = world.stepFrame(
         rawDt,
@@ -1099,19 +1283,25 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           rollOverride,
           yawOverride,
           throttleDelta,
-          mouseNdcX,
-          mouseNdcY,
-          mouseSensitivity: p.settings.controls.mouseSensitivity,
-          invertY: p.settings.controls.invertY,
+          aimDeltaYawRad:
+            p.cameraMode === 'chase' && !freeLookingInput ? consumedMouse.aimDeltaYawRad : 0,
+          aimDeltaPitchRad:
+            p.cameraMode === 'chase' && !freeLookingInput ? consumedMouse.aimDeltaPitchRad : 0,
+          aimSmoothing: p.settings.controls.aimSmoothing,
           freeLooking: freeLookingInput,
           firingHeld: keys.has('Space') || mouseFireHeld,
           cameraOrbitMode: p.cameraMode === 'orbit',
+          cameraEoirMode: p.cameraMode === 'eoir',
         },
         p.remotePilots,
       );
       if (stepOut.events.length > 0) {
         dispatchSimEvents(stepOut.events);
       }
+
+      lastRollInput = THREE.MathUtils.damp(lastRollInput, world.lastInstructorCmd.roll, 12, visualDt);
+      lastPitchInput = THREE.MathUtils.damp(lastPitchInput, world.lastInstructorCmd.pitch, 12, visualDt);
+      lastYawInput = THREE.MathUtils.damp(lastYawInput, world.lastInstructorCmd.yaw, 12, visualDt);
 
       const d = world.drone;
       const sortieTimeSec = world.sortieTimeSec;
@@ -1385,16 +1575,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       }
 
       // Camera Choreography (Chase, EO/IR Sensor Pod, Cinematic Flyby, Orbit)
-      if (p.cameraMode !== prevCamMode) {
-        prevCamMode = p.cameraMode;
-        if (p.cameraMode !== 'flyby') flybyAnchor = null;
-      }
-
-      const freeLooking = p.phase === 'playing' && keys.has('KeyC') && p.cameraMode === 'chase';
-      if (!freeLooking) {
-        freeLookYawOffset = THREE.MathUtils.damp(freeLookYawOffset, 0, 14, visualDt);
-        freeLookPitchOffset = THREE.MathUtils.damp(freeLookPitchOffset, 0, 14, visualDt);
-      }
+      const freeLooking = freeLookingInput && p.cameraMode === 'chase';
 
       if (p.phase === 'title') {
         camera.up.set(0, 1, 0);
@@ -1403,22 +1584,27 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         camera.lookAt(d.x, d.y + 0.5, d.z - 2);
       } else if (p.cameraMode === 'eoir') {
         camera.up.set(0, 1, 0);
+        const gimbalYaw = wrapAngleRad(d.yaw + eoirYawOffset + (freeLookingInput ? freeLookYawOffset : 0));
+        const gimbalPitch = clampAimPitchRad(d.pitch + eoirPitchOffset + (freeLookingInput ? freeLookPitchOffset : 0));
+        const gDir = aimAnglesToDirection(gimbalYaw, gimbalPitch);
         const cosP = Math.cos(d.pitch);
         const fwdX = -Math.sin(d.yaw) * cosP;
-        const fwdY = Math.sin(d.pitch);
         const fwdZ = -Math.cos(d.yaw) * cosP;
         camera.position.set(d.x + fwdX * 2.5, d.y - 1.1, d.z + fwdZ * 2.5);
         _vec3B.set(tgt.x, tgt.y, tgt.z);
-        _vec3C.set(d.x + fwdX * 400, d.y + fwdY * 400, d.z + fwdZ * 400);
-        _vec3B.lerp(_vec3C, 0.35);
-        camera.lookAt(_vec3B);
+        _vec3C.set(d.x + gDir.x * 420, d.y + gDir.y * 420, d.z + gDir.z * 420);
+        if (Math.abs(eoirYawOffset) > 0.03 || Math.abs(eoirPitchOffset) > 0.03 || freeLookingInput) {
+          camera.lookAt(_vec3C);
+        } else {
+          _vec3B.lerp(_vec3C, 0.35);
+          camera.lookAt(_vec3B);
+        }
       } else if (p.cameraMode === 'flyby') {
         camera.up.set(0, 1, 0);
         const speed = Math.max(25, Math.hypot(d.vx, d.vy, d.vz));
         const vxN = d.vx / speed;
         const vzN = d.vz / speed;
         if (!flybyAnchor || camera.position.distanceTo(_vec3A.set(d.x, d.y, d.z)) > 110) {
-          // Place stationary trackside camera ahead & laterally off the flightline for a sweeping close pass
           flybyAnchor = new THREE.Vector3(
             d.x + vxN * 36 - vzN * 14,
             Math.max(groundHeightAt(world.config.theaterId, d.x, d.z) + 14, d.y - 3),
@@ -1443,24 +1629,30 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         );
         camera.lookAt(d.x, d.y, d.z);
       } else {
-        const distBack = 18.5 + d.mach * 9;
-        const viewYaw = world.aimYaw + freeLookYawOffset;
-        const viewPitch = Math.max(-0.85, Math.min(0.95, world.aimPitch * 0.48 + freeLookPitchOffset));
+        // War Thunder Chase Camera: follow persistent world-space aim direction (or nose on manual override)
+        const baseCamYaw = world.manualOverrideActive ? d.yaw : world.aimYaw;
+        const baseCamPitch = clampAimPitchRad((world.manualOverrideActive ? d.pitch : world.aimPitch) * 0.72);
+        const dampAlpha = 1 - Math.exp(-9.5 * visualDt);
+        camYaw = wrapAngleRad(camYaw + wrapAngleRad(baseCamYaw - camYaw) * dampAlpha);
+        camPitch = THREE.MathUtils.damp(camPitch, baseCamPitch, 9.5, visualDt);
 
-        const targetCamX = d.x + Math.sin(viewYaw) * distBack * Math.cos(viewPitch * 0.5);
-        const targetCamY = d.y + 5.8 + Math.sin(viewPitch) * distBack * 0.72;
-        const targetCamZ = d.z + Math.cos(viewYaw) * distBack * Math.cos(viewPitch * 0.5);
-        const dampRate = freeLooking ? 18 : 8.5;
-        camera.position.set(
-          THREE.MathUtils.damp(camera.position.x, targetCamX, dampRate, visualDt),
-          THREE.MathUtils.damp(camera.position.y, targetCamY, dampRate, visualDt),
-          THREE.MathUtils.damp(camera.position.z, targetCamZ, dampRate, visualDt),
-        );
+        const viewYaw = wrapAngleRad(camYaw + freeLookYawOffset);
+        const viewPitch = clampAimPitchRad(camPitch + freeLookPitchOffset);
+        const viewDir = aimAnglesToDirection(viewYaw, viewPitch);
 
-        const lookFwdDist = freeLooking ? 12 : 48;
-        const lookAheadX = d.x - Math.sin(viewYaw) * lookFwdDist;
-        const lookAheadY = d.y + 1.5 - Math.sin(viewPitch) * (freeLooking ? 8 : 20);
-        const lookAheadZ = d.z - Math.cos(viewYaw) * lookFwdDist;
+        const distBack = 18.5 + d.mach * 8.5;
+        const targetCamX = d.x - viewDir.x * distBack;
+        const rawCamY = d.y + 4.2 - viewDir.y * distBack * 0.72;
+        const targetCamZ = d.z - viewDir.z * distBack;
+        const minCamY =
+          Math.max(theater.waterLevelM, groundHeightAt(world.config.theaterId, targetCamX, targetCamZ)) + 3.0;
+        const targetCamY = Math.max(minCamY, rawCamY);
+        camera.position.set(targetCamX, targetCamY, targetCamZ);
+
+        const lookFwdDist = freeLooking ? 18 : 65;
+        const lookAheadX = d.x + viewDir.x * lookFwdDist;
+        const lookAheadY = d.y + 1.4 + viewDir.y * lookFwdDist;
+        const lookAheadZ = d.z + viewDir.z * lookFwdDist;
 
         const camBank = freeLooking ? 0 : -d.roll * 0.14;
         camera.up.set(Math.sin(camBank), Math.cos(camBank), 0);
@@ -1482,6 +1674,8 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         world.trauma = Math.max(0, world.trauma - visualDt * 1.8);
       }
 
+      camera.updateMatrixWorld();
+
       // Synchronize Web Audio 3D listener with active camera & player velocity
       camera.getWorldDirection(_vec3B);
       audio.updateListener(
@@ -1490,6 +1684,44 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         { x: camera.up.x, y: camera.up.y, z: camera.up.z },
         { vx: d.vx, vy: d.vy, vz: d.vz },
       );
+
+      // Every rendered frame: project world-space aim direction & update frame-synced reticle DOM node directly
+      const aimDir = world.getDesiredAimDirection();
+      const aimFarX = d.x + aimDir.x * 2500;
+      const aimFarY = d.y + aimDir.y * 2500;
+      const aimFarZ = d.z + aimDir.z * 2500;
+      _vec3C.set(aimFarX - camera.position.x, aimFarY - camera.position.y, aimFarZ - camera.position.z);
+      const aimForwardDot = _vec3C.dot(_vec3B);
+      _vec3A.set(aimFarX, aimFarY, aimFarZ).project(camera);
+      let aimNdcX = _vec3A.x;
+      let aimNdcY = _vec3A.y;
+      if (aimForwardDot <= 0) {
+        aimNdcX = -aimNdcX;
+        aimNdcY = -aimNdcY;
+      }
+      const aimOnScreen = aimForwardDot > 1 && Math.abs(aimNdcX) <= 0.94 && Math.abs(aimNdcY) <= 0.92;
+      let aimScrX = (aimNdcX * 0.5 + 0.5) * 100;
+      let aimScrY = (-aimNdcY * 0.5 + 0.5) * 100;
+      const aimDx = aimScrX - 50;
+      const aimDy = aimScrY - 50;
+      const aimEdgeAngleDeg = (Math.atan2(aimDy, aimDx) * 180) / Math.PI;
+      if (!aimOnScreen) {
+        const edgeScale = Math.max(Math.abs(aimDx) / 44, Math.abs(aimDy) / 42, 1);
+        aimScrX = 50 + aimDx / edgeScale;
+        aimScrY = 50 + aimDy / edgeScale;
+      }
+      aimScrX = Math.max(4, Math.min(96, aimScrX));
+      aimScrY = Math.max(5, Math.min(95, aimScrY));
+      lastMouseAimScreen = {
+        x: aimScrX,
+        y: aimScrY,
+        onScreen: aimOnScreen,
+        edgeAngleDeg: aimEdgeAngleDeg,
+      };
+      if (p.reticleFrameRef?.current && p.phase === 'playing' && p.settings.controls.scheme === 'mouse_aim') {
+        p.reticleFrameRef.current.style.left = `${aimScrX.toFixed(2)}%`;
+        p.reticleFrameRef.current.style.top = `${aimScrY.toFixed(2)}%`;
+      }
 
       // Throttled HUD updates (<= 10 Hz)
       hudEmitAccum += visualDt;
@@ -1526,20 +1758,13 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
         const cosP = Math.cos(d.pitch);
         const noseScreen = projectPct(
-          d.x - Math.sin(d.yaw) * cosP * 320,
-          d.y + Math.sin(d.pitch) * 320,
-          d.z - Math.cos(d.yaw) * cosP * 320,
+          d.x - Math.sin(d.yaw) * cosP * 2500,
+          d.y + Math.sin(d.pitch) * 2500,
+          d.z - Math.cos(d.yaw) * cosP * 2500,
         ) ?? { x: 50, y: 50 };
 
-        const cosAimP = Math.cos(world.aimPitch);
-        const projectedAim = projectPct(
-          d.x - Math.sin(world.aimYaw) * cosAimP * 320,
-          d.y + Math.sin(world.aimPitch) * 320,
-          d.z - Math.cos(world.aimYaw) * cosAimP * 320,
-        );
-        const effMouseY = p.settings.controls.invertY ? -mouseNdcY : mouseNdcY;
-        const mouseAimX = projectedAim ? projectedAim.x : Math.max(5, Math.min(95, (mouseNdcX * 0.5 + 0.5) * 100));
-        const mouseAimY = projectedAim ? projectedAim.y : Math.max(5, Math.min(95, (-effMouseY * 0.5 + 0.5) * 100));
+        const mouseAimX = lastMouseAimScreen.x;
+        const mouseAimY = lastMouseAimScreen.y;
 
         const targetScreen = tgt.id ? projectInViewPct(tgt.x, tgt.y, tgt.z) : null;
 
@@ -1648,6 +1873,9 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           flareCooldownSec: Number(world.flareCooldownSec.toFixed(1)),
           mouseAimScreenX: mouseAimX,
           mouseAimScreenY: mouseAimY,
+          aimOnScreen: lastMouseAimScreen.onScreen,
+          aimEdgeAngleDeg: Number(lastMouseAimScreen.edgeAngleDeg.toFixed(1)),
+          pointerLocked: mouseInput.pointerLocked,
           noseScreenX: noseScreen.x,
           noseScreenY: noseScreen.y,
           targetScreenX: targetScreen ? targetScreen.x : null,
@@ -1718,15 +1946,20 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
-      window.removeEventListener('blur', clearInputs);
-      document.removeEventListener('visibilitychange', clearInputs);
+      window.removeEventListener('blur', handleWindowBlur);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('pointerlockchange', handlePointerLockChange);
+      document.removeEventListener('pointerlockerror', handlePointerLockError);
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('pointerup', handleCanvasPointerUp);
+      renderer.domElement.removeEventListener('pointerenter', handleCanvasPointerEnter);
+      renderer.domElement.removeEventListener('pointerleave', handleCanvasPointerLeave);
       renderer.domElement.removeEventListener('pointerdown', handleCanvasPointerDown);
       renderer.domElement.removeEventListener('pointermove', handleCanvasPointerMove);
       renderer.domElement.removeEventListener('wheel', handleCanvasWheel);
       renderer.domElement.removeEventListener('contextmenu', handleContextMenu);
       renderer.domElement.removeEventListener('webglcontextlost', handleContextLost);
+      releasePointerLock();
       audio.dispose();
       renderer.dispose();
     };

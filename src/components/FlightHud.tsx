@@ -55,6 +55,7 @@ interface FlightHudProps {
   onSelectSlot: (slot: number) => void;
   onFire: () => void;
   onCycleTarget: () => void;
+  reticleFrameRef?: React.MutableRefObject<HTMLDivElement | null>;
 }
 
 export const FlightHud: React.FC<FlightHudProps> = ({
@@ -83,6 +84,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
   onSelectSlot,
   onFire,
   onCycleTarget,
+  reticleFrameRef,
 }) => {
   const airframe = AIRFRAMES[loadout.airframeId];
   const theater = THEATERS[theaterId];
@@ -141,6 +143,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
       {/* War Thunder-Style Dynamic 3D Projected HUD Overlay */}
       {/* 1. Projected Aircraft Nose Vector Crosshair */}
       <div
+        data-testid="nose-vector-crosshair"
         aria-hidden="true"
         className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none"
         style={{ left: `${hud.noseScreenX}%`, top: `${hud.noseScreenY}%` }}
@@ -153,21 +156,52 @@ export const FlightHud: React.FC<FlightHudProps> = ({
         </svg>
       </div>
 
-      {/* 2. Mouse Aim Instructor Cursor Ring */}
+      {/* 2. Mouse Aim World-Space Instructor Reticle (or Off-Screen Edge Chevron) */}
       {settings.controls.scheme === 'mouse_aim' && (
         <div
+          ref={reticleFrameRef}
+          data-testid="mouse-aim-reticle"
           aria-hidden="true"
           className="fixed -translate-x-1/2 -translate-y-1/2 pointer-events-none"
           style={{ left: `${hud.mouseAimScreenX}%`, top: `${hud.mouseAimScreenY}%` }}
         >
-          <svg viewBox="-20 -20 40 40" className="w-10 h-10">
-            <circle cx="0" cy="0" r="15" fill="none" stroke={hud.kamikazeArmed ? '#fb7185' : '#f8fafc'} strokeWidth="1.4" strokeOpacity="0.88" />
-            <circle cx="0" cy="0" r="2.2" fill={hud.kamikazeArmed ? '#ef4444' : '#f59e0b'} />
-            <line x1="-19" y1="0" x2="-12" y2="0" stroke="#f8fafc" strokeWidth="1.4" />
-            <line x1="12" y1="0" x2="19" y2="0" stroke="#f8fafc" strokeWidth="1.4" />
-            <line x1="0" y1="-19" x2="0" y2="-12" stroke="#f8fafc" strokeWidth="1.4" />
-            <line x1="0" y1="12" x2="0" y2="19" stroke="#f8fafc" strokeWidth="1.4" />
-          </svg>
+          {hud.aimOnScreen ? (
+            <svg viewBox="-20 -20 40 40" className="w-10 h-10" style={{ opacity: hud.freeLooking ? 0.55 : 0.94 }}>
+              <circle
+                cx="0"
+                cy="0"
+                r="15"
+                fill="none"
+                stroke={hud.kamikazeArmed ? '#fb7185' : hud.freeLooking ? '#fbbf24' : '#f8fafc'}
+                strokeWidth="1.4"
+                strokeDasharray={hud.freeLooking ? '4 3' : undefined}
+                strokeOpacity="0.9"
+              />
+              <circle cx="0" cy="0" r="2.2" fill={hud.kamikazeArmed ? '#ef4444' : '#f59e0b'} />
+              <line x1="-19" y1="0" x2="-12" y2="0" stroke="#f8fafc" strokeWidth="1.4" />
+              <line x1="12" y1="0" x2="19" y2="0" stroke="#f8fafc" strokeWidth="1.4" />
+              <line x1="0" y1="-19" x2="0" y2="-12" stroke="#f8fafc" strokeWidth="1.4" />
+              <line x1="0" y1="12" x2="0" y2="19" stroke="#f8fafc" strokeWidth="1.4" />
+            </svg>
+          ) : (
+            <div className="flex flex-col items-center">
+              <svg
+                viewBox="-16 -16 32 32"
+                className="w-7 h-7"
+                style={{ transform: `rotate(${hud.aimEdgeAngleDeg}deg)` }}
+              >
+                <polygon
+                  points="12,0 -5,-7 -2,0 -5,7"
+                  fill="#fbbf24"
+                  stroke="#0f172a"
+                  strokeWidth="1.2"
+                />
+              </svg>
+              <span className="text-[9px] font-mono-tabular font-bold text-amber-300 bg-black/65 px-1 rounded-xs">
+                AIM
+              </span>
+            </div>
+          )}
         </div>
       )}
 
@@ -368,6 +402,18 @@ export const FlightHud: React.FC<FlightHudProps> = ({
               FREE-LOOK [C] · AIM LOCKED
             </div>
           )}
+
+          {settings.controls.scheme === 'mouse_aim' &&
+            cameraMode === 'chase' &&
+            !hud.pointerLocked &&
+            !hud.freeLooking && (
+              <div
+                data-testid="pointer-lock-hint"
+                className="bg-[#090e16]/75 border border-slate-700/70 rounded px-2.5 py-0.5 text-[10px] font-mono-tabular text-slate-300"
+              >
+                Click viewport to lock mouse aim · Esc to release
+              </div>
+            )}
 
           {hud.kamikazeArmed && (
             <div className="bg-rose-950/90 border border-rose-500 rounded px-3.5 py-1 text-xs font-display font-bold text-rose-100 tracking-wide">
