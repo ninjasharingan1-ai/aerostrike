@@ -327,16 +327,31 @@ async function startServer() {
     }
   }, 5000);
 
+  let viteMiddleware: express.RequestHandler | null = null;
+  let viteReadyPromise: Promise<void> | null = null;
+
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
+    const { createServer: createViteServer } = await import('vite').then((m) => m);
+    viteReadyPromise = createViteServer({
       server: {
         middlewareMode: true,
-        hmr: process.env.DISABLE_HMR !== 'true',
+        hmr: false,
+        watch: process.env.DISABLE_HMR === 'true' ? null : undefined,
       },
       appType: 'spa',
+    }).then((vite) => {
+      viteMiddleware = vite.middlewares;
     });
-    app.use(vite.middlewares);
+
+    app.use(async (req, res, next) => {
+      if (!viteMiddleware && viteReadyPromise) {
+        await viteReadyPromise;
+      }
+      if (viteMiddleware) {
+        return viteMiddleware(req, res, next);
+      }
+      return next();
+    });
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -349,6 +364,10 @@ async function startServer() {
   server.listen(port, '0.0.0.0', () => {
     console.log(`AEROSTRIKE Tactical Server listening on port ${port}`);
   });
+
+  if (viteReadyPromise) {
+    await viteReadyPromise;
+  }
 }
 
 startServer().catch((err) => {
