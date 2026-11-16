@@ -322,13 +322,13 @@ export const PauseAndDebriefModal: React.FC<PauseAndDebriefModalProps> = ({
               <div className="bg-slate-900/80 border border-slate-800 rounded p-2.5">
                 <div className="text-[10px] text-slate-400 uppercase flex items-center gap-1">
                   <Fuel className="w-3 h-3 text-emerald-400" />
-                  Fuel Burn
+                  Endurance
                 </div>
                 <div className="text-base font-bold text-emerald-400">
-                  {aarReport.fuelConsumedKg.toFixed(1)} kg
+                  Unlimited
                 </div>
                 <div className="text-[10px] text-slate-400 whitespace-nowrap">
-                  {aarReport.fuelBurnRateKgPerMin.toFixed(1)} kg/m · {fuelPctRemaining}% rem
+                  Fuel depletion off · {fuelPctRemaining}%
                 </div>
               </div>
               <div className="bg-slate-900/80 border border-slate-800 rounded p-2.5">

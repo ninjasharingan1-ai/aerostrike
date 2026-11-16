@@ -38,6 +38,7 @@ export interface FlightStepContext {
   flightModel?: 'arcade' | 'realistic';
   skillBonuses?: PilotSkillBonuses;
   kamikazeArmed?: boolean;
+  disableFuelDepletion?: boolean;
 }
 
 export interface KamikazeImpactYield {
@@ -373,7 +374,7 @@ export function stepDroneFlight(
   const airframeThrustScale =
     airframe.dryMassKg < 550 ? Math.min(1.0, Math.max(0.22, (airframe.dryMassKg + 140) / 840)) : 1.0;
   const kamikazeBoost = ctx.kamikazeArmed ? 1.45 : 1.0;
-  const hasFuel = fuelKg > 0.5;
+  const hasFuel = ctx.disableFuelDepletion ? true : fuelKg > 0.5;
   const machFactor = mach > propulsion.maxMach ? Math.max(0.18, 1 - (mach - propulsion.maxMach) * 1.35) : 1.0;
   const airDensityThrustFactor = Math.min(1.15, Math.pow(atmos.airDensityKgM3 / 1.225, 0.55));
   const wepThrustMult = throttle > 1.0 ? 1.0 + (throttle - 1.0) * 2.8 : 1.0;
@@ -389,18 +390,21 @@ export function stepDroneFlight(
       (isArcade ? 1.15 : 1.0)
     : 0;
 
-  // Solar photovoltaic regeneration (W) -> reduces net fuel/battery draw
-  const solarChargeRateW =
-    solar.irradianceWm2 *
-    airframe.solarWingAreaM2 *
-    0.24 *
-    sensor.solarEfficiencyBonus *
-    (ctx.skillBonuses?.solarChargeMult ?? 1.0);
-  const wepBurnMult = throttle > 1.0 ? 1.65 : 1.0;
-  const skillFuelBurnMult = ctx.skillBonuses?.fuelBurnMult ?? 1.0;
-  const fuelBurnKg = thrustN * propulsion.specificFuelConsumption * wepBurnMult * skillFuelBurnMult * 1e-5 * simDt;
-  const solarFuelEquivalent = (solarChargeRateW / 45000) * simDt;
-  fuelKg = Math.max(0, Math.min(airframe.maxFuelKg, fuelKg - fuelBurnKg + solarFuelEquivalent));
+  // Solar photovoltaic regeneration & fuel state (disabled in Stage A+ gameplay when disableFuelDepletion is true)
+  let solarChargeRateW = 0;
+  if (!ctx.disableFuelDepletion) {
+    solarChargeRateW =
+      solar.irradianceWm2 *
+      airframe.solarWingAreaM2 *
+      0.24 *
+      sensor.solarEfficiencyBonus *
+      (ctx.skillBonuses?.solarChargeMult ?? 1.0);
+    const wepBurnMult = throttle > 1.0 ? 1.65 : 1.0;
+    const skillFuelBurnMult = ctx.skillBonuses?.fuelBurnMult ?? 1.0;
+    const fuelBurnKg = thrustN * propulsion.specificFuelConsumption * wepBurnMult * skillFuelBurnMult * 1e-5 * simDt;
+    const solarFuelEquivalent = (solarChargeRateW / 45000) * simDt;
+    fuelKg = Math.max(0, Math.min(airframe.maxFuelKg, fuelKg - fuelBurnKg + solarFuelEquivalent));
+  }
 
   // Sum forces in world space
   // Lift acts perpendicular to relative airflow along wingUp projection

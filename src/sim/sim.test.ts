@@ -10,7 +10,7 @@ import {
   stepDroneFlight,
   stepWarThunderAimAngles,
 } from './flightPhysics';
-import { groundHeightAt, worldToLatLon } from './geoTheaters';
+import { groundHeightAt, THEATERS, worldToLatLon } from './geoTheaters';
 import {
   awardSortieRewards,
   canUpgradeSkill,
@@ -824,4 +824,103 @@ test('Phase 1: SeededRng reproducibility and hitstop freezes physics ticks then 
   world.stepFrame(0.04, true, NEUTRAL_STEP_INPUT, []);
   assert.ok(world.clock.tickCount >= 2, 'Simulation must resume normal fixed ticks after hitstop expires');
 });
+
+test('Stage A: disableFuelDepletion keeps fuel constant at 100%, disables solar draw/charge, and sustains thrust even from 0 fuel', () => {
+  let drone = makeBaselineDrone();
+  drone.fuelKg = 0;
+  drone.maxFuelKg = 300;
+  drone.throttle = 1.0;
+
+  for (let i = 0; i < 60; i++) {
+    drone = stepDroneFlight(
+      drone,
+      { pitchInput: 0, rollInput: 0, yawInput: 0, throttleDelta: 1 },
+      {
+        theaterId: 'edwards',
+        weatherId: 'clear',
+        utcHours: 19,
+        loadout: DEFAULT_LOADOUT,
+        sandbox: DEFAULT_SANDBOX,
+        ordnanceMassKg: 120,
+        elapsedTimeSec: i * FIXED_TIMESTEP_SEC,
+        disableFuelDepletion: true,
+      },
+      FIXED_TIMESTEP_SEC,
+    );
+  }
+
+  assert.equal(drone.fuelKg, 0, 'stepDroneFlight with disableFuelDepletion should never burn or refill fuel');
+  assert.equal(drone.solarChargeRateW, 0, 'solarChargeRateW must be zeroed when fuel/battery depletion is disabled');
+  assert.ok(drone.airspeedMs > 70, `Expected sustained propulsor thrust even at 0 fuelKg, got ${drone.airspeedMs}`);
+
+  const simWorld = new SimWorld(
+    SimWorld.createDefaultConfig({
+      disableFuelDepletion: true,
+      utcHours: 19,
+    }),
+    0x12345678,
+  );
+  const startFuel = simWorld.drone.fuelKg;
+  const fullThrust: SimStepInput = { ...NEUTRAL_STEP_INPUT, throttleDelta: 1 };
+  for (let f = 0; f < 180; f++) {
+    simWorld.stepFrame(1 / 60, true, fullThrust, []);
+  }
+  assert.equal(simWorld.drone.fuelKg, startFuel);
+  assert.equal(simWorld.drone.solarChargeRateW, 0);
+  assert.equal(
+    Math.round((simWorld.drone.fuelKg / Math.max(1, simWorld.drone.maxFuelKg)) * 100),
+    100,
+  );
+});
+
+test('Stage A: Sector 04 theater is fictionalized with no real-world Edwards AFB / Rogers Dry Lake strings', () => {
+  const sector = THEATERS.edwards;
+  assert.ok(sector.name.includes('Mojave Proving Basin — Sector 04'));
+  assert.ok(!/Edwards AFB|Rogers Dry Lake/i.test(sector.name));
+  assert.ok(!/Edwards AFB|Rogers Dry Lake/i.test(sector.region));
+  assert.ok(!/Edwards AFB|Rogers Dry Lake/i.test(sector.description));
+  for (const lm of sector.landmarks) {
+    assert.ok(!/Edwards|Rogers/i.test(lm.name), `Unexpected non-fictional landmark name: ${lm.name}`);
+  }
+  assert.ok(sector.landmarks.some((l) => l.name === 'Mesa Dry Lake Airfield'));
+  assert.ok(sector.landmarks.some((l) => l.name === 'East Crest Radar Array'));
+});
+
+test('Stage A: Combat sound and particle_burst SimEvents emit finite 3D world coordinates from SimWorld', () => {
+  const world = new SimWorld(
+    SimWorld.createDefaultConfig({
+      disableFuelDepletion: true,
+      loadout: {
+        ...DEFAULT_LOADOUT,
+        slots: ['m61_vulcan', 'mam_l', 'agm114_hellfire', 'mim140_ballistic'],
+      },
+    }),
+    0x77771111,
+  );
+  const gunRes = world.fireActiveOrdnance(true, []);
+  assert.equal(gunRes.fired, true);
+  world.setActiveSlot(1);
+  const ordRes = world.fireActiveOrdnance(true, []);
+  assert.equal(ordRes.fired, true);
+  const flareRes = world.deployFlares(true);
+  assert.equal(flareRes.ok, true);
+
+  const events = [...gunRes.events, ...ordRes.events, ...flareRes.events];
+  const sounds = events.filter((e) => e.type === 'sound');
+  const bursts = events.filter((e) => e.type === 'particle_burst');
+  assert.ok(sounds.length >= 3, `Expected at least 3 sound events, got ${sounds.length}`);
+  assert.ok(bursts.length >= 2, `Expected at least 2 particle_burst events, got ${bursts.length}`);
+
+  for (const ev of sounds) {
+    if (ev.type !== 'sound') continue;
+    assert.ok(typeof ev.x === 'number' && Number.isFinite(ev.x), `Sound ${ev.kind} missing finite x`);
+    assert.ok(typeof ev.y === 'number' && Number.isFinite(ev.y), `Sound ${ev.kind} missing finite y`);
+    assert.ok(typeof ev.z === 'number' && Number.isFinite(ev.z), `Sound ${ev.kind} missing finite z`);
+  }
+  for (const ev of bursts) {
+    if (ev.type !== 'particle_burst') continue;
+    assert.ok(Number.isFinite(ev.x) && Number.isFinite(ev.y) && Number.isFinite(ev.z));
+  }
+});
+
 

@@ -1,11 +1,21 @@
 import * as THREE from 'three';
+import { STAGE_A_PATHS } from '../assets/assetManifest';
 import { WEAPONS } from '../sim/arsenalData';
 import { AirframeId, TheaterLandmark, WeaponCategory, WeaponId } from '../sim/types';
+import { sharedAssetPipeline } from './assetPipeline';
 
 export interface DroneMeshHandle {
   group: THREE.Group;
   propellers: THREE.Object3D[];
   exhaustGlows: THREE.Mesh[];
+  aileronsPort?: THREE.Object3D[];
+  aileronsStbd?: THREE.Object3D[];
+  ruddervatorsPort?: THREE.Object3D[];
+  ruddervatorsStbd?: THREE.Object3D[];
+  eoirTurrets?: THREE.Object3D[];
+  lod?: THREE.LOD | null;
+  isGlbHero?: boolean;
+  disposeToken?: { disposed: boolean };
 }
 
 function createAirframePanelTexture(): THREE.CanvasTexture {
@@ -166,9 +176,26 @@ export function buildDroneMesh(
   accentHex = 0xf59e0b,
   equippedSlots?: WeaponId[],
 ): DroneMeshHandle {
+  const outerGroup = new THREE.Group();
   const group = new THREE.Group();
+  outerGroup.add(group);
+
   const propellers: THREE.Object3D[] = [];
   const exhaustGlows: THREE.Mesh[] = [];
+  const disposeToken = { disposed: false };
+  const handle: DroneMeshHandle = {
+    group: outerGroup,
+    propellers,
+    exhaustGlows,
+    aileronsPort: [],
+    aileronsStbd: [],
+    ruddervatorsPort: [],
+    ruddervatorsStbd: [],
+    eoirTurrets: [],
+    lod: null,
+    isGlbHero: false,
+    disposeToken,
+  };
 
   const hullMat = new THREE.MeshStandardMaterial({
     color: getAirframeBaseColor(airframeId),
@@ -730,7 +757,58 @@ export function buildDroneMesh(
     }
   });
 
-  return { group, propellers, exhaustGlows };
+  if (airframeId === 'bayraktar_tb2') {
+    sharedAssetPipeline
+      .buildLodGroup(
+        {
+          lod0: STAGE_A_PATHS.tb2Lod0,
+          lod1: STAGE_A_PATHS.tb2Lod1,
+          lod2: STAGE_A_PATHS.tb2Lod2,
+        },
+        [0, 140, 480],
+      )
+      .then((lod) => {
+        if (disposeToken.disposed) {
+          sharedAssetPipeline.disposeObject3D(lod);
+          return;
+        }
+
+        const nextProps: THREE.Object3D[] = [];
+        const aPort: THREE.Object3D[] = [];
+        const aStbd: THREE.Object3D[] = [];
+        const rPort: THREE.Object3D[] = [];
+        const rStbd: THREE.Object3D[] = [];
+        const turrets: THREE.Object3D[] = [];
+
+        lod.traverse((node) => {
+          if (node.name === 'propeller_assembly') nextProps.push(node);
+          else if (node.name === 'aileron_port') aPort.push(node);
+          else if (node.name === 'aileron_stbd') aStbd.push(node);
+          else if (node.name === 'ruddervator_port') rPort.push(node);
+          else if (node.name === 'ruddervator_stbd') rStbd.push(node);
+          else if (node.name === 'eoir_turret') turrets.push(node);
+        });
+
+        outerGroup.remove(group);
+        sharedAssetPipeline.disposeObject3D(group);
+        outerGroup.add(lod);
+
+        handle.propellers.length = 0;
+        handle.propellers.push(...nextProps);
+        handle.aileronsPort = aPort;
+        handle.aileronsStbd = aStbd;
+        handle.ruddervatorsPort = rPort;
+        handle.ruddervatorsStbd = rStbd;
+        handle.eoirTurrets = turrets;
+        handle.lod = lod;
+        handle.isGlbHero = true;
+      })
+      .catch(() => {
+        // Keep clean procedural TB2 fallback active on load error
+      });
+  }
+
+  return handle;
 }
 
 /**
@@ -904,32 +982,39 @@ export function buildTargetStructure(landmark: Omit<TheaterLandmark, 'hp'>): THR
       g.add(cap);
     }
   } else if (landmark.type === 'airbase') {
-    const runway = new THREE.Mesh(new THREE.BoxGeometry(38, 1.2, 180), steelMat);
-    runway.position.y = 0.6;
-    g.add(runway);
-    const stripeMat = new THREE.MeshBasicMaterial({ color: 0xf8fafc });
-    for (let sz = -70; sz <= 70; sz += 20) {
-      const dash = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.15, 9), stripeMat);
-      dash.position.set(0, 1.28, sz);
-      g.add(dash);
-    }
-    const hangar = new THREE.Mesh(new THREE.BoxGeometry(24, 12, 32), concreteMat);
+    const hangar = new THREE.Mesh(new THREE.BoxGeometry(26, 12, 34), concreteMat);
     hangar.position.set(-34, 6, -15);
     g.add(hangar);
-    const tower = new THREE.Mesh(new THREE.BoxGeometry(9, 24, 9), concreteMat);
-    tower.position.set(28, 12, 0);
+    const hangarDoor = new THREE.Mesh(new THREE.BoxGeometry(2, 9, 26), steelMat);
+    hangarDoor.position.set(-20.8, 4.5, -15);
+    g.add(hangarDoor);
+    const shelterB = new THREE.Mesh(new THREE.BoxGeometry(22, 9, 26), concreteMat);
+    shelterB.position.set(-34, 4.5, 24);
+    g.add(shelterB);
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(8, 22, 8), concreteMat);
+    tower.position.set(28, 11, 0);
     g.add(tower);
-    const cab = new THREE.Mesh(new THREE.CylinderGeometry(7, 5, 5, 8), hazardMat);
-    cab.position.set(28, 26, 0);
+    const cab = new THREE.Mesh(new THREE.CylinderGeometry(6.5, 5, 4.5, 8), steelMat);
+    cab.position.set(28, 23.5, 0);
     g.add(cab);
+    const beacon = new THREE.Mesh(new THREE.CylinderGeometry(5.6, 5.6, 1.4, 8), hazardMat);
+    beacon.position.set(28, 26.2, 0);
+    g.add(beacon);
   } else {
     for (let i = -1; i <= 1; i++) {
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 4, 13), steelMat);
-      hull.position.set(i * 12, 2.5, i * 8);
+      const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 3.6, 13), steelMat);
+      hull.position.set(i * 12, 2.2, i * 8);
       g.add(hull);
-      const cab = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 4), hazardMat);
-      cab.position.set(i * 12, 5, i * 8 - 3);
-      g.add(cab);
+      const turret = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.0, 2.0, 8), concreteMat);
+      turret.position.set(i * 12, 4.8, i * 8 - 1);
+      g.add(turret);
+      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 7.5, 6), steelMat);
+      barrel.rotation.x = Math.PI / 2;
+      barrel.position.set(i * 12, 5.0, i * 8 - 5.2);
+      g.add(barrel);
+      const beacon = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 1.4), hazardMat);
+      beacon.position.set(i * 12, 6.1, i * 8 - 1);
+      g.add(beacon);
     }
   }
 

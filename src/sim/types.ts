@@ -74,7 +74,7 @@ export type WeatherId =
 
 export type TheaterId = 'edwards' | 'alps' | 'hormuz' | 'baltic';
 
-export type CameraMode = 'chase' | 'eoir' | 'orbit';
+export type CameraMode = 'chase' | 'eoir' | 'flyby' | 'orbit';
 
 export interface AirframeSpec {
   id: AirframeId;

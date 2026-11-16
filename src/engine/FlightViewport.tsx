@@ -23,7 +23,9 @@ import {
   WeaponId,
   WeatherId,
 } from '../sim/types';
+import { STAGE_A_PATHS } from '../assets/assetManifest';
 import { CyberTargetOption } from '../components/CyberWarfareModal';
+import { sharedAssetPipeline } from './assetPipeline';
 import { TacticalAudioSynth } from './audioSynth';
 import { buildDroneMesh, buildOrdnanceMesh, buildTargetStructure, DroneMeshHandle } from './droneModels';
 import { buildTheaterTerrain } from './terrainEngine';
@@ -159,7 +161,37 @@ function toSimWorldConfig(p: FlightViewportProps): SimWorldConfig {
     controlScheme: p.settings.controls.scheme,
     instructorAutoLevel: p.settings.controls.instructorAutoLevel,
     radarWarningAudio: p.settings.gameplay.radarWarningAudio,
+    disableFuelDepletion: true,
   };
+}
+
+function createSoftSmokeSpriteTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.clearRect(0, 0, 128, 128);
+    const puffs = [
+      [64, 64, 58, 0.72],
+      [48, 56, 40, 0.48],
+      [78, 58, 38, 0.45],
+      [58, 78, 36, 0.42],
+    ];
+    for (const [cx, cy, r, a] of puffs) {
+      const grad = ctx.createRadialGradient(cx, cy, r * 0.08, cx, cy, r);
+      grad.addColorStop(0, `rgba(255,255,255,${a})`);
+      grad.addColorStop(0.42, `rgba(255,255,255,${a * 0.55})`);
+      grad.addColorStop(1, 'rgba(255,255,255,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
 }
 
 export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
@@ -226,26 +258,30 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       14000,
     );
 
-    // Studio & Outdoor PBR reflections
+    sharedAssetPipeline.bindRenderer(renderer);
+
+    // Studio & Outdoor PBR reflections — start with fast RoomEnvironment, upgrade asynchronously to Poly Haven HDRI
     const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    let initialEnvTex: THREE.Texture | null = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    scene.environment = initialEnvTex;
+    scene.environmentIntensity = 0.78;
     pmrem.dispose();
 
-    // Atmospheric Sky Dome
+    // Atmospheric Sky Dome (backlit sunlit desert scattering)
     const sky = new Sky();
     sky.scale.setScalar(25000);
     scene.add(sky);
     const skyUniforms = sky.material.uniforms;
-    skyUniforms['turbidity'].value = 4.2;
-    skyUniforms['rayleigh'].value = 1.8;
-    skyUniforms['mieCoefficient'].value = 0.005;
-    skyUniforms['mieDirectionalG'].value = 0.82;
+    skyUniforms['turbidity'].value = 1.45;
+    skyUniforms['rayleigh'].value = 0.58;
+    skyUniforms['mieCoefficient'].value = 0.0018;
+    skyUniforms['mieDirectionalG'].value = 0.78;
 
-    // Warm/cool 3-point outdoor lighting
-    const hemiLight = new THREE.HemisphereLight(0x9bc4e8, 0x3f3328, 0.72);
+    // Warm/cool 3-point outdoor lighting calibrated to desert IBL
+    const hemiLight = new THREE.HemisphereLight(0xaad1f0, 0x5c4732, 0.82);
     scene.add(hemiLight);
 
-    const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.9);
+    const sunLight = new THREE.DirectionalLight(0xfff1d6, 2.25);
     sunLight.castShadow = !isSoftwareGl;
     sunLight.shadow.mapSize.width = 1024;
     sunLight.shadow.mapSize.height = 1024;
@@ -261,7 +297,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     scene.add(sunLight);
     scene.add(sunLight.target);
 
-    scene.fog = new THREE.FogExp2(0x9ec4e2, 0.00018);
+    scene.fog = new THREE.FogExp2(0xc4b092, 0.00016);
 
     // Headless Simulation World (fixed-timestep)
     const world = new SimWorld(toSimWorldConfig(propsRef.current));
@@ -361,13 +397,63 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       fl.intensity = 18000 * scale;
     }
 
-    // Pooled Particle Ring Buffer (Zero-GC)
-    const PARTICLE_COUNT = 260;
-    const particleGeo = new THREE.SphereGeometry(0.85, 6, 5);
-    const particleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const particleMesh = new THREE.InstancedMesh(particleGeo, particleMat, PARTICLE_COUNT);
-    particleMesh.frustumCulled = false;
-    scene.add(particleMesh);
+    // Pooled Soft Camera-Facing Wispy Billboard Particle Cloud (Zero-GC ShaderMaterial)
+    const PARTICLE_COUNT = 320;
+    const smokeTex = createSoftSmokeSpriteTexture();
+    const pPositions = new Float32Array(PARTICLE_COUNT * 3);
+    const pColors = new Float32Array(PARTICLE_COUNT * 3);
+    const pSizes = new Float32Array(PARTICLE_COUNT);
+    const pAlphas = new Float32Array(PARTICLE_COUNT);
+
+    const particleGeo = new THREE.BufferGeometry();
+    const posAttr = new THREE.BufferAttribute(pPositions, 3);
+    const colAttr = new THREE.BufferAttribute(pColors, 3);
+    const sizeAttr = new THREE.BufferAttribute(pSizes, 1);
+    const alphaAttr = new THREE.BufferAttribute(pAlphas, 1);
+    particleGeo.setAttribute('position', posAttr);
+    particleGeo.setAttribute('aColor', colAttr);
+    particleGeo.setAttribute('aSize', sizeAttr);
+    particleGeo.setAttribute('aAlpha', alphaAttr);
+
+    const particleMat = new THREE.ShaderMaterial({
+      uniforms: {
+        uMap: { value: smokeTex },
+        uProjScale: { value: (container.clientHeight || window.innerHeight) * 0.85 },
+      },
+      vertexShader: `
+        attribute float aSize;
+        attribute float aAlpha;
+        attribute vec3 aColor;
+        varying vec3 vColor;
+        varying float vAlpha;
+        uniform float uProjScale;
+        void main() {
+          vColor = aColor;
+          vAlpha = aAlpha;
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = aAlpha <= 0.001 ? 0.0 : clamp(aSize * (uProjScale / max(6.0, -mvPosition.z)), 2.0, 220.0);
+          gl_Position = projectionMatrix * mvPosition;
+        }
+      `,
+      fragmentShader: `
+        uniform sampler2D uMap;
+        varying vec3 vColor;
+        varying float vAlpha;
+        void main() {
+          if (vAlpha <= 0.001) discard;
+          vec4 tex = texture2D(uMap, gl_PointCoord);
+          float alpha = tex.a * vAlpha;
+          if (alpha <= 0.01) discard;
+          gl_FragColor = vec4(vColor * tex.rgb, alpha);
+        }
+      `,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.NormalBlending,
+    });
+    const particlePoints = new THREE.Points(particleGeo, particleMat);
+    particlePoints.frustumCulled = false;
+    scene.add(particlePoints);
 
     const particles: PooledParticle[] = Array.from({ length: PARTICLE_COUNT }, () => ({
       active: false,
@@ -385,6 +471,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       b: 0.1,
     }));
     let particleCursor = 0;
+    let lastVfxEvent: { type: string; x: number; y: number; z: number; count: number; tSec: number } | null = null;
 
     function spawnParticleBurst(
       x: number,
@@ -398,22 +485,33 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       b: number,
       life = 0.8,
     ) {
-      for (let i = 0; i < count; i++) {
+      const preset = propsRef.current.settings.graphics.preset;
+      const densityScale = preset === 'low' ? 0.5 : preset === 'balanced' ? 0.8 : 1.0;
+      const spawnTotal = Math.max(1, Math.round(count * densityScale));
+      lastVfxEvent = {
+        type: 'particle_burst',
+        x: Math.round(x),
+        y: Math.round(y),
+        z: Math.round(z),
+        count: spawnTotal,
+        tSec: Number(world.sortieTimeSec.toFixed(2)),
+      };
+      for (let i = 0; i < spawnTotal; i++) {
         const pt = particles[particleCursor];
         particleCursor = (particleCursor + 1) % PARTICLE_COUNT;
         pt.active = true;
-        pt.x = x;
-        pt.y = y;
-        pt.z = z;
+        pt.x = x + (Math.random() - 0.5) * size * 0.4;
+        pt.y = y + (Math.random() - 0.5) * size * 0.4;
+        pt.z = z + (Math.random() - 0.5) * size * 0.4;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.random() * Math.PI - Math.PI / 2;
-        const v = speed * (0.35 + Math.random() * 0.85);
+        const v = speed * (0.25 + Math.random() * 0.75);
         pt.vx = Math.cos(theta) * Math.cos(phi) * v;
-        pt.vy = Math.abs(Math.sin(phi)) * v + speed * 0.25;
+        pt.vy = Math.abs(Math.sin(phi)) * v + speed * 0.2;
         pt.vz = Math.sin(theta) * Math.cos(phi) * v;
         pt.age = 0;
-        pt.life = life * (0.7 + Math.random() * 0.6);
-        pt.size = size * (0.7 + Math.random() * 0.6);
+        pt.life = life * (0.75 + Math.random() * 0.55);
+        pt.size = size * 2.35 * (0.75 + Math.random() * 0.55);
         pt.r = r;
         pt.g = g;
         pt.b = b;
@@ -440,6 +538,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     const remoteMeshes = new Map<string, DroneMeshHandle>();
     const ordnanceMeshes = new Map<string, THREE.Group>();
     let cloudGroupRef: THREE.Group | null = null;
+    let terrainDisposeToken: { disposed: boolean } | null = null;
     let lastResScale = propsRef.current.settings.graphics.resolutionScale;
 
     // Camera & Viewport Input State
@@ -448,21 +547,52 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     let orbitYawOffset = 0;
     let freeLookYawOffset = 0;
     let freeLookPitchOffset = 0;
+    let flybyAnchor: THREE.Vector3 | null = null;
+    let prevCamMode: CameraMode = propsRef.current.cameraMode;
     let lastPointerX: number | null = null;
     let lastPointerY: number | null = null;
     let mouseNdcX = 0;
     let mouseNdcY = 0;
     let zoomHeld = false;
     let zoomToggled = false;
+    let hdriOwned = false;
+    let lastRollInput = 0;
+    let lastPitchInput = 0;
+    let lastYawInput = 0;
+
+    sharedAssetPipeline
+      .loadHdriEnvironment(STAGE_A_PATHS.hdriDesert, renderer)
+      .then((hdriEnvTex) => {
+        if (disposed) return;
+        scene.environment = hdriEnvTex;
+        scene.environmentIntensity = 0.85;
+        hdriOwned = true;
+        if (initialEnvTex) {
+          initialEnvTex.dispose();
+          initialEnvTex = null;
+        }
+      })
+      .catch(() => {});
 
     function rebuildTheaterMeshes(theaterId: TheaterId) {
+      if (terrainDisposeToken) {
+        terrainDisposeToken.disposed = true;
+        terrainDisposeToken = null;
+      }
       while (theaterGroup.children.length > 0) {
-        theaterGroup.remove(theaterGroup.children[0]);
+        const child = theaterGroup.children[0];
+        theaterGroup.remove(child);
+        sharedAssetPipeline.disposeObject3D(child);
       }
       landmarkMeshes.clear();
 
       const maxAniso = renderer.capabilities.getMaxAnisotropy();
-      const { terrainMesh, waterMesh, cloudGroup, propGroup } = buildTheaterTerrain(theaterId, maxAniso);
+      const { terrainMesh, waterMesh, cloudGroup, propGroup, disposeToken } = buildTheaterTerrain(
+        theaterId,
+        maxAniso,
+        isSoftwareGl,
+      );
+      terrainDisposeToken = disposeToken;
       theaterGroup.add(terrainMesh);
       theaterGroup.add(propGroup);
       if (waterMesh) theaterGroup.add(waterMesh);
@@ -480,7 +610,11 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         landmarkMeshes.set(lm.id, mesh);
       }
 
-      for (const m of aiMeshes.values()) scene.remove(m.group);
+      for (const m of aiMeshes.values()) {
+        if (m.disposeToken) m.disposeToken.disposed = true;
+        scene.remove(m.group);
+        sharedAssetPipeline.disposeObject3D(m.group);
+      }
       aiMeshes.clear();
       for (const bot of world.aiBots) {
         const handle = buildDroneMesh(bot.airframeId, bot.team === 'alpha' ? 0x38bdf8 : 0xef4444);
@@ -509,6 +643,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
             const mesh = ordnanceMeshes.get(ev.id);
             if (mesh) {
               scene.remove(mesh);
+              sharedAssetPipeline.disposeObject3D(mesh);
               ordnanceMeshes.delete(ev.id);
             }
             break;
@@ -539,20 +674,25 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           case 'shockwave':
             spawnShockwave(ev.x, ev.y, ev.z, ev.scale);
             break;
-          case 'sound':
-            if (ev.kind === 'cannon') audio.playCannonShot();
-            else if (ev.kind === 'glide_release') audio.playGlideRelease();
-            else if (ev.kind === 'missile_launch') audio.playMissileLaunch(Boolean(ev.isBallistic));
+          case 'sound': {
+            const coords =
+              typeof ev.x === 'number' && typeof ev.y === 'number' && typeof ev.z === 'number'
+                ? { x: ev.x, y: ev.y, z: ev.z, vx: ev.vx, vy: ev.vy, vz: ev.vz }
+                : undefined;
+            if (ev.kind === 'cannon') audio.playCannonShot(coords);
+            else if (ev.kind === 'glide_release') audio.playGlideRelease(coords);
+            else if (ev.kind === 'missile_launch') audio.playMissileLaunch(Boolean(ev.isBallistic), coords);
             else if (ev.kind === 'lock_chirp') audio.playLockChirp();
             else if (ev.kind === 'hit_marker') audio.playHitMarker(Boolean(ev.isKill));
-            else if (ev.kind === 'explosion') audio.playExplosion(ev.intensity ?? 1.0);
-            else if (ev.kind === 'aaa_burst') audio.playAntiAirBurst();
-            else if (ev.kind === 'flare_pop') audio.playFlarePop();
+            else if (ev.kind === 'explosion') audio.playExplosion(ev.intensity ?? 1.0, coords);
+            else if (ev.kind === 'aaa_burst') audio.playAntiAirBurst(coords);
+            else if (ev.kind === 'flare_pop') audio.playFlarePop(coords);
             else if (ev.kind === 'cyber_inject') audio.playCyberInject();
             else if (ev.kind === 'cyber_purge') audio.playCyberPurge();
             else if (ev.kind === 'cyber_alert') audio.playCyberAlert();
             else if (ev.kind === 'kamikaze_siren') audio.playKamikazeLockSiren();
             break;
+          }
           case 'game_over':
             p.onGameOver(ev.victory, ev.summary);
             break;
@@ -568,6 +708,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     let mouseFireHeld = false;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      audio.warmUp();
       if (
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
@@ -630,6 +771,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     };
 
     const handleCanvasPointerDown = (e: PointerEvent) => {
+      audio.warmUp();
       if (propsRef.current.phase !== 'playing') return;
       if (e.button === 0) {
         mouseFireHeld = true;
@@ -763,6 +905,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      particleMat.uniforms.uProjScale.value = h * 0.85;
     };
     window.addEventListener('resize', handleResize);
 
@@ -776,6 +919,82 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     let lastTimeMs = performance.now();
     let frameId = 0;
     let disposed = false;
+
+    // Rolling 60-frame timing & Stage-A diagnostic telemetry bridge
+    const frameTimesMs: number[] = [];
+    const winAny = window as unknown as Record<string, unknown>;
+    winAny.__AEROSTRIKE_DEBUG__ = {
+      getMetrics: () => {
+        const sorted = [...frameTimesMs].sort((a, b) => a - b);
+        const avgMs =
+          frameTimesMs.length > 0
+            ? frameTimesMs.reduce((s, v) => s + v, 0) / frameTimesMs.length
+            : 16.7;
+        const p95Ms = sorted.length > 0 ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 16.7;
+        const { theater } = world.getEnvironmentSnapshot();
+        return {
+          fps: Number((1000 / Math.max(0.5, avgMs)).toFixed(1)),
+          avgFrameMs: Number(avgMs.toFixed(2)),
+          p95FrameMs: Number(p95Ms.toFixed(2)),
+          isSoftwareGl,
+          rendererMemory: {
+            geometries: renderer.info.memory.geometries,
+            textures: renderer.info.memory.textures,
+          },
+          rendererRender: {
+            calls: renderer.info.render.calls,
+            triangles: renderer.info.render.triangles,
+          },
+          assetPipeline: sharedAssetPipeline.getStats(),
+          audio: audio.getAudioTelemetry(),
+          playerGlbLoaded: Boolean(playerMeshHandle.isGlbHero),
+          cameraMode: propsRef.current.cameraMode,
+          fuelPct: Math.round((world.drone.fuelKg / Math.max(1, world.drone.maxFuelKg)) * 100),
+          dronePos: {
+            x: Number(world.drone.x.toFixed(1)),
+            y: Number(world.drone.y.toFixed(1)),
+            z: Number(world.drone.z.toFixed(1)),
+          },
+          theaterName: theater.name,
+          landmarkNames: world.landmarks.map((l) => l.name),
+          lastVfxEvent,
+        };
+      },
+      runResourceSwapAudit: () => {
+        const initialGeo = renderer.info.memory.geometries;
+        const initialTex = renderer.info.memory.textures;
+        // Cycle airframe (bayraktar_tb2 <-> mq9x) & theater (edwards <-> alps) with explicit disposal
+        const tempGroup = new THREE.Group();
+        const swapAirframes: Array<'mq9x' | 'bayraktar_tb2'> = ['mq9x', 'bayraktar_tb2', 'mq9x', 'bayraktar_tb2'];
+        for (const af of swapAirframes) {
+          const h = buildDroneMesh(af, 0xf59e0b, world.config.loadout.slots);
+          tempGroup.add(h.group);
+          if (h.disposeToken) h.disposeToken.disposed = true;
+          tempGroup.remove(h.group);
+          sharedAssetPipeline.disposeObject3D(h.group);
+        }
+        const swapTheaters: Array<'alps' | 'edwards'> = ['alps', 'edwards', 'alps', 'edwards'];
+        for (const th of swapTheaters) {
+          const built = buildTheaterTerrain(th, renderer.capabilities.getMaxAnisotropy(), isSoftwareGl);
+          built.disposeToken.disposed = true;
+          sharedAssetPipeline.disposeObject3D(built.terrainMesh);
+          sharedAssetPipeline.disposeObject3D(built.propGroup);
+          sharedAssetPipeline.disposeObject3D(built.cloudGroup);
+          if (built.waterMesh) sharedAssetPipeline.disposeObject3D(built.waterMesh);
+        }
+        const finalGeo = renderer.info.memory.geometries;
+        const finalTex = renderer.info.memory.textures;
+        return {
+          initialGeo,
+          finalGeo,
+          deltaGeo: finalGeo - initialGeo,
+          initialTex,
+          finalTex,
+          deltaTex: finalTex - initialTex,
+          pipelineStats: sharedAssetPipeline.getStats(),
+        };
+      },
+    };
 
     function afterDraw(cb: () => void) {
       const gl = renderer.getContext() as WebGL2RenderingContext;
@@ -803,13 +1022,17 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       const nowMs = performance.now();
       const rawDt = Math.max(0.001, (nowMs - lastTimeMs) / 1000);
       lastTimeMs = nowMs;
+      frameTimesMs.push(rawDt * 1000);
+      if (frameTimesMs.length > 60) frameTimesMs.shift();
       const visualDt = Math.min(0.05, rawDt);
       const p = propsRef.current;
 
       // Synchronize config (theater / loadout / sandbox / settings / skill bonuses)
       const sync = world.syncConfig(toSimWorldConfig(p));
       if (sync.loadoutChanged) {
+        if (playerMeshHandle.disposeToken) playerMeshHandle.disposeToken.disposed = true;
         scene.remove(playerMeshHandle.group);
+        sharedAssetPipeline.disposeObject3D(playerMeshHandle.group);
         playerMeshHandle = buildDroneMesh(p.loadout.airframeId, 0xf59e0b, p.loadout.slots);
         scene.add(playerMeshHandle.group);
       }
@@ -854,6 +1077,20 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         (keys.has('ControlLeft') || keys.has('Minus') ? 1 : 0);
       const freeLookingInput = keys.has('KeyC') && p.cameraMode !== 'orbit';
 
+      lastRollInput = THREE.MathUtils.damp(
+        lastRollInput,
+        Math.abs(rollOverride) > 0.05 ? rollOverride : -Math.max(-1, Math.min(1, mouseNdcX * 1.4)),
+        10,
+        visualDt,
+      );
+      lastPitchInput = THREE.MathUtils.damp(
+        lastPitchInput,
+        Math.abs(pitchOverride) > 0.05 ? pitchOverride : Math.max(-1, Math.min(1, mouseNdcY * 1.2)),
+        10,
+        visualDt,
+      );
+      lastYawInput = THREE.MathUtils.damp(lastYawInput, yawOverride, 10, visualDt);
+
       const stepOut = world.stepFrame(
         rawDt,
         p.phase === 'playing',
@@ -878,15 +1115,13 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
       const d = world.drone;
       const sortieTimeSec = world.sortieTimeSec;
+      const { theater, weather, solar, atmos } = world.getEnvironmentSnapshot();
 
       if (p.phase === 'playing' && world.hitstopTimer <= 0) {
-        audio.updateEngine(d.throttle, d.mach, world.getPropulsionLabel());
+        audio.updateEngine(d.throttle, d.mach, world.getPropulsionLabel(), p.cameraMode, weather.windSpeedMs);
       }
-
-      // Update Sky, Sun Light, Fog from Solar Ephemeris & Weather
-      const { theater, weather, solar, atmos } = world.getEnvironmentSnapshot();
       skyUniforms['sunPosition'].value.set(solar.sunDirX, solar.sunDirY, solar.sunDirZ);
-      skyUniforms['turbidity'].value = 2.5 + weather.cloudCover * 10;
+      skyUniforms['turbidity'].value = 1.45 + weather.cloudCover * 6.5;
 
       sunLight.position.set(
         d.x + solar.sunDirX * 1200,
@@ -938,12 +1173,24 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         precipMesh.instanceMatrix.needsUpdate = true;
       }
 
-      // Sync Player Mesh
+      // Sync Player Mesh & Stage-A Articulated TB2 Sub-Nodes
       playerMeshHandle.group.position.set(d.x, d.y, d.z);
       _euler.set(d.pitch, d.yaw, d.roll, 'YXZ');
       playerMeshHandle.group.quaternion.setFromEuler(_euler);
       for (const prop of playerMeshHandle.propellers) {
-        prop.rotation.z += visualDt * (18 + d.throttle * 38);
+        prop.rotation.z += visualDt * (22 + d.throttle * 44);
+      }
+      if (playerMeshHandle.aileronsPort) {
+        for (const a of playerMeshHandle.aileronsPort) a.rotation.x = lastRollInput * 0.34;
+      }
+      if (playerMeshHandle.aileronsStbd) {
+        for (const a of playerMeshHandle.aileronsStbd) a.rotation.x = -lastRollInput * 0.34;
+      }
+      if (playerMeshHandle.ruddervatorsPort) {
+        for (const r of playerMeshHandle.ruddervatorsPort) r.rotation.x = lastPitchInput * 0.28 + lastYawInput * 0.22;
+      }
+      if (playerMeshHandle.ruddervatorsStbd) {
+        for (const r of playerMeshHandle.ruddervatorsStbd) r.rotation.x = lastPitchInput * 0.28 - lastYawInput * 0.22;
       }
       for (const glow of playerMeshHandle.exhaustGlows) {
         glow.scale.setScalar(0.7 + d.throttle * 0.6);
@@ -996,12 +1243,14 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       }
       for (const [id, handle] of remoteMeshes.entries()) {
         if (!activeRemoteIds.has(id)) {
+          if (handle.disposeToken) handle.disposeToken.disposed = true;
           scene.remove(handle.group);
+          sharedAssetPipeline.disposeObject3D(handle.group);
           remoteMeshes.delete(id);
         }
       }
 
-      // Step Visual Shockwaves, Flash Lights, Pooled Particles & EW Wireframes
+      // Step Visual Shockwaves, Flash Lights, Pooled Billboard Particles & EW Wireframes
       for (let i = 0; i < SHOCKWAVE_POOL_SIZE; i++) {
         const sw = shockwaves[i];
         if (!sw.active) continue;
@@ -1023,36 +1272,47 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         else fl.intensity = 0;
       }
 
+      const windRadPart = (weather.windHeadingDeg * Math.PI) / 180;
+      const windPartVx = Math.sin(windRadPart) * weather.windSpeedMs * 0.35;
+      const windPartVz = -Math.cos(windRadPart) * weather.windSpeedMs * 0.35;
+
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         const pt = particles[i];
         if (!pt.active) {
-          _vec3A.set(0, -9999, 0);
-          _scaleVec.setScalar(0.001);
-          _quat.identity();
-          _mat4.compose(_vec3A, _quat, _scaleVec);
-          particleMesh.setMatrixAt(i, _mat4);
+          pAlphas[i] = 0;
+          pSizes[i] = 0;
           continue;
         }
         pt.age += visualDt;
         if (pt.age >= pt.life) {
           pt.active = false;
+          pAlphas[i] = 0;
+          pSizes[i] = 0;
           continue;
         }
+        pt.vx = pt.vx * Math.exp(-1.6 * visualDt) + windPartVx * visualDt * 0.35;
+        pt.vz = pt.vz * Math.exp(-1.6 * visualDt) + windPartVz * visualDt * 0.35;
+        pt.vy = pt.vy * Math.exp(-1.2 * visualDt) + 4.8 * visualDt;
         pt.x += pt.vx * visualDt;
         pt.y += pt.vy * visualDt;
         pt.z += pt.vz * visualDt;
-        pt.vy -= 12 * visualDt;
-        const lifeRatio = 1 - pt.age / pt.life;
-        _vec3A.set(pt.x, pt.y, pt.z);
-        _scaleVec.setScalar(pt.size * (0.4 + lifeRatio * 0.9));
-        _quat.identity();
-        _mat4.compose(_vec3A, _quat, _scaleVec);
-        particleMesh.setMatrixAt(i, _mat4);
-        _color.setRGB(pt.r * lifeRatio, pt.g * lifeRatio, pt.b * lifeRatio);
-        particleMesh.setColorAt(i, _color);
+
+        const progress = pt.age / pt.life;
+        const lifeRatio = 1 - progress;
+        const idx3 = i * 3;
+        pPositions[idx3] = pt.x;
+        pPositions[idx3 + 1] = pt.y;
+        pPositions[idx3 + 2] = pt.z;
+        pColors[idx3] = pt.r;
+        pColors[idx3 + 1] = pt.g;
+        pColors[idx3 + 2] = pt.b;
+        pSizes[i] = pt.size * (0.65 + progress * 1.45);
+        pAlphas[i] = Math.min(0.85, lifeRatio * lifeRatio * 1.25);
       }
-      particleMesh.instanceMatrix.needsUpdate = true;
-      if (particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
+      posAttr.needsUpdate = true;
+      colAttr.needsUpdate = true;
+      sizeAttr.needsUpdate = true;
+      alphaAttr.needsUpdate = true;
 
       let ewCursor = 0;
       for (const [tid, st] of world.cyberStatus.entries()) {
@@ -1116,19 +1376,31 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         impactRing.visible = false;
       }
 
-      // Camera Choreography (Hold-C Free Look & Bank Tilt)
+      // Point locked target turret toward locked target azimuth cleanly
+      if (playerMeshHandle.eoirTurrets && tgt.id) {
+        const relAz = Math.atan2(tgt.x - d.x, tgt.z - d.z) - d.yaw;
+        for (const t of playerMeshHandle.eoirTurrets) {
+          t.rotation.y = relAz;
+        }
+      }
+
+      // Camera Choreography (Chase, EO/IR Sensor Pod, Cinematic Flyby, Orbit)
+      if (p.cameraMode !== prevCamMode) {
+        prevCamMode = p.cameraMode;
+        if (p.cameraMode !== 'flyby') flybyAnchor = null;
+      }
+
       const freeLooking = p.phase === 'playing' && keys.has('KeyC') && p.cameraMode === 'chase';
       if (!freeLooking) {
-        const recov = 1 - Math.exp(-16 * visualDt);
-        freeLookYawOffset *= 1 - recov;
-        freeLookPitchOffset *= 1 - recov;
+        freeLookYawOffset = THREE.MathUtils.damp(freeLookYawOffset, 0, 14, visualDt);
+        freeLookPitchOffset = THREE.MathUtils.damp(freeLookPitchOffset, 0, 14, visualDt);
       }
 
       if (p.phase === 'title') {
         camera.up.set(0, 1, 0);
         const t = performance.now() * 0.00028;
-        camera.position.set(d.x + Math.cos(t) * 34, d.y + 11 + Math.sin(t * 1.6) * 4, d.z + Math.sin(t) * 34);
-        camera.lookAt(d.x, d.y + 1, d.z - 12);
+        camera.position.set(d.x + Math.cos(t) * 20, d.y + 5.5 + Math.sin(t * 1.6) * 2.2, d.z + Math.sin(t) * 20);
+        camera.lookAt(d.x, d.y + 0.5, d.z - 2);
       } else if (p.cameraMode === 'eoir') {
         camera.up.set(0, 1, 0);
         const cosP = Math.cos(d.pitch);
@@ -1140,27 +1412,50 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         _vec3C.set(d.x + fwdX * 400, d.y + fwdY * 400, d.z + fwdZ * 400);
         _vec3B.lerp(_vec3C, 0.35);
         camera.lookAt(_vec3B);
+      } else if (p.cameraMode === 'flyby') {
+        camera.up.set(0, 1, 0);
+        const speed = Math.max(25, Math.hypot(d.vx, d.vy, d.vz));
+        const vxN = d.vx / speed;
+        const vzN = d.vz / speed;
+        if (!flybyAnchor || camera.position.distanceTo(_vec3A.set(d.x, d.y, d.z)) > 110) {
+          // Place stationary trackside camera ahead & laterally off the flightline for a sweeping close pass
+          flybyAnchor = new THREE.Vector3(
+            d.x + vxN * 36 - vzN * 14,
+            Math.max(groundHeightAt(world.config.theaterId, d.x, d.z) + 14, d.y - 3),
+            d.z + vzN * 36 + vxN * 14,
+          );
+        }
+        camera.position.copy(flybyAnchor);
+        camera.lookAt(d.x, d.y, d.z);
+        const flyDist = camera.position.distanceTo(_vec3A.set(d.x, d.y, d.z));
+        const targetFov = THREE.MathUtils.clamp(52 - Math.min(20, flyDist * 0.25), 28, 54);
+        if (Math.abs(camera.fov - targetFov) > 0.1) {
+          camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 7, visualDt);
+          camera.updateProjectionMatrix();
+        }
       } else if (p.cameraMode === 'orbit') {
         camera.up.set(0, 1, 0);
         orbitYawOffset += visualDt * 0.35;
         camera.position.set(
-          d.x + Math.sin(d.yaw + orbitYawOffset) * 26,
-          d.y + 8,
-          d.z + Math.cos(d.yaw + orbitYawOffset) * 26,
+          d.x + Math.sin(d.yaw + orbitYawOffset) * 20,
+          d.y + 6.5,
+          d.z + Math.cos(d.yaw + orbitYawOffset) * 20,
         );
         camera.lookAt(d.x, d.y, d.z);
       } else {
-        const dampK = 1 - Math.exp(-8.2 * visualDt);
-        const distBack = 23 + d.mach * 10;
+        const distBack = 18.5 + d.mach * 9;
         const viewYaw = world.aimYaw + freeLookYawOffset;
         const viewPitch = Math.max(-0.85, Math.min(0.95, world.aimPitch * 0.48 + freeLookPitchOffset));
 
-        _vec3A.set(
-          d.x + Math.sin(viewYaw) * distBack * Math.cos(viewPitch * 0.5),
-          d.y + 7.2 + Math.sin(viewPitch) * distBack * 0.72,
-          d.z + Math.cos(viewYaw) * distBack * Math.cos(viewPitch * 0.5),
+        const targetCamX = d.x + Math.sin(viewYaw) * distBack * Math.cos(viewPitch * 0.5);
+        const targetCamY = d.y + 5.8 + Math.sin(viewPitch) * distBack * 0.72;
+        const targetCamZ = d.z + Math.cos(viewYaw) * distBack * Math.cos(viewPitch * 0.5);
+        const dampRate = freeLooking ? 18 : 8.5;
+        camera.position.set(
+          THREE.MathUtils.damp(camera.position.x, targetCamX, dampRate, visualDt),
+          THREE.MathUtils.damp(camera.position.y, targetCamY, dampRate, visualDt),
+          THREE.MathUtils.damp(camera.position.z, targetCamZ, dampRate, visualDt),
         );
-        camera.position.lerp(_vec3A, freeLooking ? 0.45 : dampK);
 
         const lookFwdDist = freeLooking ? 12 : 48;
         const lookAheadX = d.x - Math.sin(viewYaw) * lookFwdDist;
@@ -1175,7 +1470,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         const baseFov = p.settings.graphics.fovDeg;
         const targetFov = isZoomed ? 30 : baseFov + Math.min(18, d.mach * 12);
         if (Math.abs(camera.fov - targetFov) > 0.1) {
-          camera.fov += (targetFov - camera.fov) * dampK;
+          camera.fov = THREE.MathUtils.damp(camera.fov, targetFov, 9, visualDt);
           camera.updateProjectionMatrix();
         }
       }
@@ -1186,6 +1481,15 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         camera.position.y += (Math.random() - 0.5) * shake;
         world.trauma = Math.max(0, world.trauma - visualDt * 1.8);
       }
+
+      // Synchronize Web Audio 3D listener with active camera & player velocity
+      camera.getWorldDirection(_vec3B);
+      audio.updateListener(
+        { x: camera.position.x, y: camera.position.y, z: camera.position.z },
+        { x: _vec3B.x, y: _vec3B.y, z: _vec3B.z },
+        { x: camera.up.x, y: camera.up.y, z: camera.up.z },
+        { vx: d.vx, vy: d.vy, vz: d.vz },
+      );
 
       // Throttled HUD updates (<= 10 Hz)
       hudEmitAccum += visualDt;
@@ -1396,6 +1700,22 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       disposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      if (terrainDisposeToken) terrainDisposeToken.disposed = true;
+      if (playerMeshHandle.disposeToken) playerMeshHandle.disposeToken.disposed = true;
+      for (const m of aiMeshes.values()) {
+        if (m.disposeToken) m.disposeToken.disposed = true;
+      }
+      for (const m of remoteMeshes.values()) {
+        if (m.disposeToken) m.disposeToken.disposed = true;
+      }
+      sharedAssetPipeline.disposeObject3D(scene);
+      if (initialEnvTex && !hdriOwned) {
+        initialEnvTex.dispose();
+        initialEnvTex = null;
+      }
+      smokeTex.dispose();
+      delete winAny.__AEROSTRIKE_DEBUG__;
+
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       window.removeEventListener('blur', clearInputs);

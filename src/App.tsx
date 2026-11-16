@@ -461,7 +461,9 @@ export default function App() {
       } else if (e.code === 'KeyO') {
         setShowSettings((s) => !s);
       } else if (e.code === 'KeyU' && phase === 'playing' && !anyModalOpen) {
-        setCameraMode((prev) => (prev === 'chase' ? 'eoir' : prev === 'eoir' ? 'orbit' : 'chase'));
+        setCameraMode((prev) =>
+          prev === 'chase' ? 'eoir' : prev === 'eoir' ? 'flyby' : prev === 'flyby' ? 'orbit' : 'chase',
+        );
       } else if (e.code === 'KeyH' && phase !== 'title') {
         setShowHangar((s) => !s);
       } else if (e.code === 'KeyG' && phase !== 'title') {
@@ -839,7 +841,9 @@ export default function App() {
             bridgeRef.current?.armKamikazeDive();
           }}
           onCycleCamera={() =>
-            setCameraMode((prev) => (prev === 'chase' ? 'eoir' : prev === 'eoir' ? 'orbit' : 'chase'))
+            setCameraMode((prev) =>
+              prev === 'chase' ? 'eoir' : prev === 'eoir' ? 'flyby' : prev === 'flyby' ? 'orbit' : 'chase',
+            )
           }
           onSelectSlot={(s) => bridgeRef.current?.setActiveSlot(s)}
           onFire={() => bridgeRef.current?.fireActiveOrdnance()}

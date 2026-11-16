@@ -311,19 +311,11 @@ export const FlightHud: React.FC<FlightHudProps> = ({
               </>
             )}
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-slate-300 font-mono-tabular">
-            <span>g {hud.localGravityMs2.toFixed(2)} m/s²</span>
-            <span aria-hidden="true">·</span>
-            <span>Sun {hud.solarElevationDeg}° ({hud.solarChargeW}W)</span>
-            <span aria-hidden="true">·</span>
-            <span>Wind {hud.windSpeedKnots} kt</span>
-            {sandbox.enabled && (
-              <>
-                <span aria-hidden="true">·</span>
-                <span className="text-cyan-400 font-semibold">Sandbox</span>
-              </>
-            )}
-          </div>
+          {sandbox.enabled && (
+            <div className="mt-1 text-[11px] font-mono-tabular text-cyan-400 font-semibold">
+              Sandbox Mode
+            </div>
+          )}
           {hud.lockedTargetName && (
             <div className="mt-1.5 pt-1.5 border-t border-slate-800 flex items-center justify-between gap-3 text-xs font-mono-tabular">
               <span className="text-rose-400 font-medium truncate">
@@ -592,10 +584,10 @@ export const FlightHud: React.FC<FlightHudProps> = ({
 
           <div className="h-8 w-px bg-slate-800" />
 
-          {/* Structural Hull Pips + Fuel */}
+          {/* Structural Hull Pips */}
           <div className="whitespace-nowrap">
             <div className="text-[10px] uppercase tracking-wider text-slate-400 mb-1">
-              Hull {hud.hp}/{hud.maxHp} · Fuel {hud.fuelPct}%
+              Hull {hud.hp}/{hud.maxHp}
             </div>
             <div className="flex items-center gap-1">
               {Array.from({ length: hullPips }).map((_, idx) => (

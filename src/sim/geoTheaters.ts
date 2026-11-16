@@ -3,8 +3,8 @@ import { TheaterId, TheaterSpec } from './types';
 export const THEATERS: Record<TheaterId, TheaterSpec> = {
   edwards: {
     id: 'edwards',
-    name: 'Edwards AFB / Mojave Basin',
-    region: 'California, USA',
+    name: 'Mojave Proving Basin — Sector 04',
+    region: 'Western High-Desert Range',
     latDeg: 34.9054,
     lonDeg: -117.8839,
     worldRadiusM: 3200,
@@ -12,13 +12,13 @@ export const THEATERS: Record<TheaterId, TheaterSpec> = {
     waterLevelM: -999,
     defaultWeather: 'clear',
     description:
-      'High-desert dry lakebed and surrounding Tehachapi foothills used for hypersonic, glide-bomb, and ballistic flight-test envelopes.',
+      'Composite high-desert dry lakebed and basalt ridges in Sector 04 used for UAV strike, EW denial, and close-air combat evaluation.',
     landmarks: [
-      { id: 'edw-hq', name: 'Rogers Dry Lake Control', type: 'airbase', x: 0, z: -200, maxHp: 300, points: 250 },
+      { id: 'edw-hq', name: 'Mesa Dry Lake Airfield', type: 'airbase', x: 0, z: -200, maxHp: 300, points: 250 },
       { id: 'edw-sam1', name: 'North Ridge SAM Site', type: 'sam', x: -720, z: -1350, maxHp: 110, points: 180, threatRadiusM: 850 },
-      { id: 'edw-rad1', name: 'C-Band Tracking Array', type: 'radar', x: 860, z: -1120, maxHp: 90, points: 150, threatRadiusM: 950 },
-      { id: 'edw-bnk1', name: 'Hardened Test Bunker Alpha', type: 'bunker', x: -1250, z: -2100, maxHp: 220, points: 320 },
-      { id: 'edw-dep1', name: 'Forward Munitions Depot', type: 'depot', x: 1180, z: -1950, maxHp: 140, points: 200 },
+      { id: 'edw-rad1', name: 'East Crest Radar Array', type: 'radar', x: 860, z: -1120, maxHp: 90, points: 150, threatRadiusM: 950 },
+      { id: 'edw-bnk1', name: 'Sector Bunker Alpha', type: 'bunker', x: -1250, z: -2100, maxHp: 220, points: 320 },
+      { id: 'edw-dep1', name: 'Forward Logistics Depot', type: 'depot', x: 1180, z: -1950, maxHp: 140, points: 200 },
       { id: 'edw-cnv1', name: 'Desert Armored Convoy', type: 'convoy', x: 180, z: -1650, maxHp: 95, points: 160 },
     ],
   },

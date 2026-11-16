@@ -72,6 +72,7 @@ export interface SimWorldConfig {
   controlScheme: ControlScheme;
   instructorAutoLevel: boolean;
   radarWarningAudio: boolean;
+  disableFuelDepletion?: boolean;
 }
 
 export interface SimCyberTargetInfo {
@@ -177,6 +178,12 @@ export type SimEvent =
       intensity?: number;
       isKill?: boolean;
       isBallistic?: boolean;
+      x?: number;
+      y?: number;
+      z?: number;
+      vx?: number;
+      vy?: number;
+      vz?: number;
     }
   | {
       type: 'game_over';
@@ -327,6 +334,7 @@ export class SimWorld {
       controlScheme: 'mouse_aim',
       instructorAutoLevel: true,
       radarWarningAudio: true,
+      disableFuelDepletion: false,
       ...overrides,
     };
   }
@@ -682,7 +690,16 @@ export class SimWorld {
         life: 1.4,
       });
     }
-    this.emit({ type: 'sound', kind: 'glide_release' });
+    this.emit({
+      type: 'sound',
+      kind: 'flare_pop',
+      x: this.drone.x,
+      y: this.drone.y - 0.8,
+      z: this.drone.z,
+      vx: this.drone.vx,
+      vy: this.drone.vy,
+      vz: this.drone.vz,
+    });
     this.emitAar('ordnance', 'Countermeasures Deployed', `IR Flares & Chaff salvo (${this.flaresRemaining} remaining)`);
     return { ok: true, events: this.drainEvents() };
   }
@@ -774,29 +791,66 @@ export class SimWorld {
     }
 
     if (spec.category === 'cannon') {
-      this.emit({ type: 'sound', kind: 'cannon' });
+      this.emit({
+        type: 'sound',
+        kind: 'cannon',
+        x: this.drone.x + fwdX * 3.8,
+        y: this.drone.y - 0.3,
+        z: this.drone.z + fwdZ * 3.8,
+        vx: this.drone.vx,
+        vy: this.drone.vy,
+        vz: this.drone.vz,
+      });
       this.emit({
         type: 'particle_burst',
         x: this.drone.x + fwdX * 3.8,
         y: this.drone.y - 0.3,
         z: this.drone.z + fwdZ * 3.8,
-        count: 2,
-        speed: 12,
-        size: 0.32,
+        count: 3,
+        speed: 14,
+        size: 0.45,
         r: 1.0,
         g: 0.85,
         b: 0.3,
-        life: 0.08,
+        life: 0.14,
       });
       this.trauma = Math.min(1, this.trauma + 0.08);
     } else if (spec.category === 'glide_bomb' || spec.category === 'drop_bomb') {
-      this.emit({ type: 'sound', kind: 'glide_release' });
+      this.emit({
+        type: 'sound',
+        kind: 'glide_release',
+        x: this.drone.x,
+        y: this.drone.y - 1.5,
+        z: this.drone.z,
+        vx: this.drone.vx,
+        vy: this.drone.vy,
+        vz: this.drone.vz,
+      });
       this.trauma = Math.min(1, this.trauma + 0.14);
     } else {
       this.emit({
         type: 'sound',
         kind: 'missile_launch',
         isBallistic: spec.category === 'ballistic_missile',
+        x: this.drone.x + fwdX * 2.5,
+        y: this.drone.y - 1.5,
+        z: this.drone.z + fwdZ * 2.5,
+        vx: this.drone.vx,
+        vy: this.drone.vy,
+        vz: this.drone.vz,
+      });
+      this.emit({
+        type: 'particle_burst',
+        x: this.drone.x + fwdX * 1.2,
+        y: this.drone.y - 1.5,
+        z: this.drone.z + fwdZ * 1.2,
+        count: 6,
+        speed: 18,
+        size: 1.4,
+        r: 0.96,
+        g: 0.72,
+        b: 0.38,
+        life: 0.45,
       });
       this.trauma = Math.min(1, this.trauma + (spec.category === 'ballistic_missile' ? 0.35 : 0.2));
     }
@@ -893,7 +947,7 @@ export class SimWorld {
       let destroyed = false;
       if (spec.directDamage > 0) {
         lm.hp = Math.max(0, lm.hp - spec.directDamage);
-        this.emit({ type: 'sound', kind: 'explosion', intensity: 1.15 });
+        this.emit({ type: 'sound', kind: 'explosion', intensity: 1.15, x: lm.x, y: ly, z: lm.z, vx: 0, vy: 0, vz: 0 });
         this.emit({ type: 'particle_burst', x: lm.x, y: ly, z: lm.z, count: 22, speed: 58, size: 4.8, r: 1.0, g: 0.48, b: 0.12, life: 1.1 });
         if (lm.hp === 0) {
           destroyed = true;
@@ -952,7 +1006,7 @@ export class SimWorld {
         if (ai.hp === 0) {
           destroyed = true;
           this.redTickets = Math.max(0, this.redTickets - 65);
-          this.emit({ type: 'sound', kind: 'explosion', intensity: 1.2 });
+          this.emit({ type: 'sound', kind: 'explosion', intensity: 1.2, x: ai.x, y: ai.y, z: ai.z, vx: ai.vx, vy: ai.vy, vz: ai.vz });
           this.emit({ type: 'sound', kind: 'hit_marker', isKill: true });
           this.score += 250;
           this.emit({
@@ -1078,7 +1132,7 @@ export class SimWorld {
     this.emit({ type: 'shockwave', x: impactX, y: impactY, z: impactZ, scale: 2.2 });
     this.emit({ type: 'particle_burst', x: impactX, y: impactY + 4, z: impactZ, count: 48, speed: 105, size: 7.6, r: 1.0, g: 0.52, b: 0.1, life: 1.35 });
     this.emit({ type: 'particle_burst', x: impactX, y: impactY + 6, z: impactZ, count: 28, speed: 52, size: 8.2, r: 0.28, g: 0.28, b: 0.3, life: 1.8 });
-    this.emit({ type: 'sound', kind: 'explosion', intensity: 2.2 });
+    this.emit({ type: 'sound', kind: 'explosion', intensity: 2.2, x: impactX, y: impactY, z: impactZ, vx: 0, vy: 0, vz: 0 });
     this.trauma = 1.0;
     this.hitstopTimer = 0.075;
 
@@ -1313,6 +1367,7 @@ export class SimWorld {
         flightModel: this.config.flightModel,
         skillBonuses: this.config.skillBonuses,
         kamikazeArmed: this.kamikazeArmed,
+        disableFuelDepletion: Boolean(this.config.disableFuelDepletion),
       },
       dt,
     );
@@ -1439,7 +1494,16 @@ export class SimWorld {
           });
         }
         if (Math.hypot(this.drone.x - updatedBot.x, this.drone.z - updatedBot.z) < 1600) {
-          this.emit({ type: 'sound', kind: 'flare_pop' });
+          this.emit({
+            type: 'sound',
+            kind: 'flare_pop',
+            x: updatedBot.x,
+            y: updatedBot.y,
+            z: updatedBot.z,
+            vx: updatedBot.vx,
+            vy: updatedBot.vy,
+            vz: updatedBot.vz,
+          });
         }
       }
 
@@ -1464,6 +1528,18 @@ export class SimWorld {
           targetY: stepRes.aimPoint.y,
           targetZ: stepRes.aimPoint.z,
         });
+        if (Math.hypot(this.drone.x - updatedBot.x, this.drone.z - updatedBot.z) < 1400) {
+          this.emit({
+            type: 'sound',
+            kind: 'cannon',
+            x: updatedBot.x,
+            y: updatedBot.y,
+            z: updatedBot.z,
+            vx: updatedBot.vx,
+            vy: updatedBot.vy,
+            vz: updatedBot.vz,
+          });
+        }
       }
 
       if (stepRes.wantsMissile && stepRes.targetId) {
@@ -1486,6 +1562,18 @@ export class SimWorld {
           targetY: stepRes.aimPoint.y,
           targetZ: stepRes.aimPoint.z,
         });
+        if (Math.hypot(this.drone.x - updatedBot.x, this.drone.z - updatedBot.z) < 2200) {
+          this.emit({
+            type: 'sound',
+            kind: 'missile_launch',
+            x: updatedBot.x,
+            y: updatedBot.y - 1.5,
+            z: updatedBot.z,
+            vx: updatedBot.vx,
+            vy: updatedBot.vy,
+            vz: updatedBot.vz,
+          });
+        }
       }
     }
 
@@ -1570,8 +1658,9 @@ export class SimWorld {
           targetY: leadY,
           targetZ: leadZ,
         });
+        this.emit({ type: 'particle_burst', x: lm.x, y: aaaY + 2.5, z: lm.z, count: 4, speed: 18, size: 1.8, r: 1.0, g: 0.78, b: 0.34, life: 0.32 });
         this.emit({ type: 'particle_burst', x: leadX, y: leadY, z: leadZ, count: 5, speed: 22, size: 3.6, r: 0.28, g: 0.25, b: 0.22, life: 0.85 });
-        this.emit({ type: 'sound', kind: 'aaa_burst' });
+        this.emit({ type: 'sound', kind: 'aaa_burst', x: leadX, y: leadY, z: leadZ, vx: 0, vy: 0, vz: 0 });
       }
 
       if (lm.type === 'sam' && d < threatR && this.rng.next() < dt * 0.14) {
@@ -1674,7 +1763,17 @@ export class SimWorld {
           this.drone.hp = Math.max(0, this.drone.hp - dmg);
           this.trauma = Math.min(1, this.trauma + (spec.category === 'cannon' ? 0.25 : 0.6));
           if (spec.category !== 'cannon') this.hitstopTimer = 0.04;
-          this.emit({ type: 'sound', kind: 'explosion', intensity: spec.category === 'cannon' ? 0.55 : 1.1 });
+          this.emit({
+            type: 'sound',
+            kind: 'explosion',
+            intensity: spec.category === 'cannon' ? 0.55 : 1.1,
+            x: updated.x,
+            y: updated.y,
+            z: updated.z,
+            vx: this.drone.vx,
+            vy: this.drone.vy,
+            vz: this.drone.vz,
+          });
           this.emit({
             type: 'particle_burst',
             x: updated.x,
@@ -1725,7 +1824,17 @@ export class SimWorld {
             if (ai.hp === 0) {
               this.emit({ type: 'shockwave', x: updated.x, y: updated.y, z: updated.z, scale: 1.2 });
               this.emit({ type: 'particle_burst', x: updated.x, y: updated.y, z: updated.z, count: 24, speed: 65, size: 5.0, r: 1, g: 0.52, b: 0.1, life: 1.1 });
-              this.emit({ type: 'sound', kind: 'explosion', intensity: 1.25 });
+              this.emit({
+                type: 'sound',
+                kind: 'explosion',
+                intensity: 1.25,
+                x: updated.x,
+                y: updated.y,
+                z: updated.z,
+                vx: ai.vx,
+                vy: ai.vy,
+                vz: ai.vz,
+              });
               this.redTickets = Math.max(0, this.redTickets - 65);
               if (updated.ownerId === 'player') {
                 this.score += 250;
@@ -1788,7 +1897,17 @@ export class SimWorld {
           b: 0.12,
           life: isHeavy ? 1.25 : 0.55,
         });
-        this.emit({ type: 'sound', kind: 'explosion', intensity: isHeavy ? 1.55 : 0.65 });
+        this.emit({
+          type: 'sound',
+          kind: 'explosion',
+          intensity: isHeavy ? 1.55 : 0.65,
+          x: updated.x,
+          y: groundY + 4,
+          z: updated.z,
+          vx: 0,
+          vy: 0,
+          vz: 0,
+        });
         if (isHeavy && updated.ownerId === 'player') {
           this.trauma = Math.min(1, this.trauma + 0.44);
           this.hitstopTimer = 0.04;
@@ -1884,7 +2003,17 @@ export class SimWorld {
     if (!this.gameOverTriggered && this.drone.hp <= 0 && this.reserveDrones > 1) {
       this.emit({ type: 'shockwave', x: this.drone.x, y: this.drone.y, z: this.drone.z, scale: 1.4 });
       this.emit({ type: 'particle_burst', x: this.drone.x, y: this.drone.y, z: this.drone.z, count: 28, speed: 65, size: 5.5, r: 1, g: 0.45, b: 0.1, life: 1.1 });
-      this.emit({ type: 'sound', kind: 'explosion', intensity: 1.4 });
+      this.emit({
+        type: 'sound',
+        kind: 'explosion',
+        intensity: 1.4,
+        x: this.drone.x,
+        y: this.drone.y,
+        z: this.drone.z,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+      });
       this.reserveDrones -= 1;
       this.blueTickets = Math.max(0, this.blueTickets - 120);
       this.kamikazeArmed = false;
