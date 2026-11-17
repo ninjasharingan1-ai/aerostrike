@@ -27,6 +27,8 @@ public:
     void SetManualOverrideInput(double Pitch, double Roll, double Yaw, double ThrottleDelta);
     void SetFlightPreset(bool bRealistic);
     void SetKamikazeArmed(bool bArmed);
+    FVector2D ConsumeFreeLookDeltaRadians();
+    FVector2D ConsumeEoirDeltaRadians();
 
     UFUNCTION(BlueprintPure, Category = "AeroStrike|Flight")
     FVector GetDesiredAimWorldDirectionUE() const;
@@ -71,4 +73,6 @@ private:
     bool bManualWasActive = false;
     bool bFreeLookHeld = false;
     bool bEoirActive = false;
+    FVector2D PendingFreeLookDeltaRad = FVector2D::ZeroVector;
+    FVector2D PendingEoirDeltaRad = FVector2D::ZeroVector;
 };
