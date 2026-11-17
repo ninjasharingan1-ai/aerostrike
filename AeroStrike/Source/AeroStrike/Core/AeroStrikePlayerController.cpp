@@ -101,7 +101,7 @@ void AAeroStrikePlayerController::HandleAimLook(const FInputActionValue& Value)
     AAeroStrikeUavPawn* Uav = GetUavPawn();
     if (!Uav || !Uav->GetFlightComponent()) return;
     const FVector2D Delta = Value.Get<FVector2D>();
-    double MouseX = 0.0, MouseY = 0.0;
+    float MouseX = 0.0f, MouseY = 0.0f;
     GetMousePosition(MouseX, MouseY);
     const bool bEoir = Uav->GetCameraMode() == EAeroStrikeCameraMode::EoirSensor;
     Uav->GetFlightComponent()->PushMousePointerDelta(MouseX, MouseY, Delta.X, -Delta.Y, Uav->IsFreeLookHeld(), bEoir);
@@ -169,7 +169,7 @@ void AAeroStrikePlayerController::FallbackMouseX(float AxisValue)
     if (FMath::IsNearlyZero(AxisValue)) return;
     AAeroStrikeUavPawn* Uav = GetUavPawn();
     if (!Uav || !Uav->GetFlightComponent()) return;
-    double X = 0.0, Y = 0.0;
+    float X = 0.0f, Y = 0.0f;
     GetMousePosition(X, Y);
     Uav->GetFlightComponent()->PushMousePointerDelta(
         X, Y, AxisValue, 0.0, Uav->IsFreeLookHeld(),
@@ -181,7 +181,7 @@ void AAeroStrikePlayerController::FallbackMouseY(float AxisValue)
     if (FMath::IsNearlyZero(AxisValue)) return;
     AAeroStrikeUavPawn* Uav = GetUavPawn();
     if (!Uav || !Uav->GetFlightComponent()) return;
-    double X = 0.0, Y = 0.0;
+    float X = 0.0f, Y = 0.0f;
     GetMousePosition(X, Y);
     Uav->GetFlightComponent()->PushMousePointerDelta(
         X, Y, 0.0, -AxisValue, Uav->IsFreeLookHeld(),
