@@ -69,4 +69,20 @@ private:
     void HandleCycleCamera(const FInputActionValue& Value);
     void HandleTogglePointerLock(const FInputActionValue& Value);
     void SelectWeaponSlot(int32 SlotIdx);
+
+    // Engine-native temporary bindings while the authored Enhanced Input .uassets are absent.
+    // These are deliberately enabled only when the corresponding IA_* asset is unassigned.
+    void FallbackMouseX(float AxisValue);
+    void FallbackMouseY(float AxisValue);
+    void FallbackFirePressed();
+    void FallbackFireReleased();
+    void FallbackFireMode();
+    void FallbackFreeLookStarted();
+    void FallbackFreeLookCompleted();
+    void FallbackCycleCamera();
+    void FallbackTogglePointerLock();
+    void FallbackSlotOne();
+    void FallbackSlotTwo();
+    void FallbackSlotThree();
+    void FallbackSlotFour();
 };
