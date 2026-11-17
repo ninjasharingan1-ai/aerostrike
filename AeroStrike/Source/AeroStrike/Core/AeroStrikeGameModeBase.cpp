@@ -26,7 +26,6 @@ void AAeroStrikeGameModeBase::BeginPlay()
             FVector(-80000.0f, 0.0f, 0.0f), FRotator::ZeroRotator);
         if (Ground)
         {
-            Ground->SetActorLabel(TEXT("AeroStrike_M25A1_TemporaryTrainingGround"));
             Ground->GetStaticMeshComponent()->SetStaticMesh(GroundMesh);
             Ground->SetActorScale3D(FVector(6000.0f, 6000.0f, 1.0f));
             Ground->GetStaticMeshComponent()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
