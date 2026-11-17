@@ -95,6 +95,11 @@ void UWeaponLoadoutComponent::SelectSlot(int32 NewSlotIndex)
 
 void UWeaponLoadoutComponent::CycleActiveFireMode()
 {
+    if (GetOwner() && !GetOwner()->HasAuthority())
+    {
+        ServerCycleActiveFireMode();
+        return;
+    }
     const auto Spec = BuildSimVariant(StateMachine.activeSlot);
     auto& Slot = StateMachine.slots[StateMachine.activeSlot];
     Slot.fireMode = AeroStrike::SimCore::cycleAllowedFireMode(Spec, Slot.fireMode);
@@ -121,6 +126,11 @@ void UWeaponLoadoutComponent::ServerRequestPrimaryFire_Implementation(bool bPres
 void UWeaponLoadoutComponent::ServerSelectSlot_Implementation(int32 NewSlotIndex)
 {
     SelectSlot(NewSlotIndex);
+}
+
+void UWeaponLoadoutComponent::ServerCycleActiveFireMode_Implementation()
+{
+    CycleActiveFireMode();
 }
 
 void UWeaponLoadoutComponent::MulticastWeaponEvent_Implementation(
