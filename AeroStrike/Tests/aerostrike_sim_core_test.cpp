@@ -161,6 +161,15 @@ static void testCompatibilityAuditAndLoadoutNormalization() {
         assert(s == "songar_556");
     }
 
+    // The catalog may have no compatible fallback. Never silently mount an invalid variant.
+    const std::vector<WeaponVariantSpec> onlyIncompatible{ fireStorm };
+    const auto noCompatible = normalizeLoadoutSlots(
+        lancet, { "fire_storm_250", "fire_storm_250", "fire_storm_250", "fire_storm_250" },
+        onlyIncompatible, false);
+    for (const auto& slot : noCompatible) {
+        assert(slot.empty());
+    }
+
     std::cout << "[PASS] WeaponFamilyCore compatibility separation & safe normalization\n";
 }
 
