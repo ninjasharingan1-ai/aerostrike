@@ -16,6 +16,7 @@ class AEROSTRIKE_API AAeroStrikePlayerController : public APlayerController
 
 public:
     virtual void BeginPlay() override;
+    virtual void Tick(float DeltaSeconds) override;
     virtual void SetupInputComponent() override;
     virtual void OnWindowFocusLost();
 
