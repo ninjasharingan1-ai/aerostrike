@@ -1,5 +1,6 @@
 #include "Weapons/WeaponLoadoutComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "DrawDebugHelpers.h"
 
 UWeaponLoadoutComponent::UWeaponLoadoutComponent()
 {
@@ -137,6 +138,16 @@ void UWeaponLoadoutComponent::MulticastWeaponEvent_Implementation(
     EWeaponEventKindBP EventKind, int32 SlotIndex, FName WeaponId, int32 RemainingAmmo)
 {
     OnWeaponGameplayEvent.Broadcast(EventKind, SlotIndex, WeaponId, RemainingAmmo);
+
+    // Temporary, visible proof of the input -> server fire FSM -> multicast event pipeline.
+    // Diagnostic only; not a projectile, hitscan, damage or production VFX implementation.
+    if (EventKind == EWeaponEventKindBP::RoundFired &&
+        WeaponId == FName(TEXT("aerostrike_training_gun")) && GetOwner() && GetWorld())
+    {
+        const FVector From = GetOwner()->GetActorLocation() + GetOwner()->GetActorForwardVector() * 280.0f;
+        const FVector To = From + GetOwner()->GetActorForwardVector() * 15000.0f;
+        DrawDebugLine(GetWorld(), From, To, FColor::Yellow, false, 0.12f, 0, 2.5f);
+    }
 }
 
 AeroStrike::SimCore::WeaponVariantSpec UWeaponLoadoutComponent::BuildSimVariant(int32 SlotIdx) const
