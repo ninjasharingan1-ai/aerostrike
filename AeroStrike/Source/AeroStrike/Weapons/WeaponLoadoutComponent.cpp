@@ -1,5 +1,6 @@
 #include "Weapons/WeaponLoadoutComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "DrawDebugHelpers.h"
 
 UWeaponLoadoutComponent::UWeaponLoadoutComponent()
 {
@@ -16,6 +17,22 @@ void UWeaponLoadoutComponent::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 void UWeaponLoadoutComponent::BeginPlay()
 {
     Super::BeginPlay();
+    bool bAnyAuthoredWeapon = false;
+    for (const auto& Variant : EquippedVariants)
+    {
+        if (Variant) { bAnyAuthoredWeapon = true; break; }
+    }
+    if (!bAnyAuthoredWeapon)
+    {
+        // Deliberately fictional bootstrap weapon: proves input -> state machine -> gameplay event.
+        // No real-world weapon integration or combat capability is implied.
+        auto& Training = StateMachine.slots[0];
+        Training.weaponId = "aerostrike_training_gun";
+        Training.ammoRemaining = 120;
+        Training.fireMode = AeroStrike::SimCore::EFireMode::Auto;
+        UE_LOG(LogTemp, Warning, TEXT("AeroStrike M2.5-A.1 training gun active; replace with authored Weapon Data Assets."));
+        return;
+    }
     for (int32 i = 0; i < 4; ++i)
     {
         if (EquippedVariants.IsValidIndex(i) && EquippedVariants[i])
@@ -79,6 +96,11 @@ void UWeaponLoadoutComponent::SelectSlot(int32 NewSlotIndex)
 
 void UWeaponLoadoutComponent::CycleActiveFireMode()
 {
+    if (GetOwner() && !GetOwner()->HasAuthority())
+    {
+        ServerCycleActiveFireMode();
+        return;
+    }
     const auto Spec = BuildSimVariant(StateMachine.activeSlot);
     auto& Slot = StateMachine.slots[StateMachine.activeSlot];
     Slot.fireMode = AeroStrike::SimCore::cycleAllowedFireMode(Spec, Slot.fireMode);
@@ -107,10 +129,25 @@ void UWeaponLoadoutComponent::ServerSelectSlot_Implementation(int32 NewSlotIndex
     SelectSlot(NewSlotIndex);
 }
 
+void UWeaponLoadoutComponent::ServerCycleActiveFireMode_Implementation()
+{
+    CycleActiveFireMode();
+}
+
 void UWeaponLoadoutComponent::MulticastWeaponEvent_Implementation(
     EWeaponEventKindBP EventKind, int32 SlotIndex, FName WeaponId, int32 RemainingAmmo)
 {
     OnWeaponGameplayEvent.Broadcast(EventKind, SlotIndex, WeaponId, RemainingAmmo);
+
+    // Temporary, visible proof of the input -> server fire FSM -> multicast event pipeline.
+    // Diagnostic only; not a projectile, hitscan, damage or production VFX implementation.
+    if (EventKind == EWeaponEventKindBP::RoundFired &&
+        WeaponId == FName(TEXT("aerostrike_training_gun")) && GetOwner() && GetWorld())
+    {
+        const FVector From = GetOwner()->GetActorLocation() + GetOwner()->GetActorForwardVector() * 280.0f;
+        const FVector To = From + GetOwner()->GetActorForwardVector() * 15000.0f;
+        DrawDebugLine(GetWorld(), From, To, FColor::Yellow, false, 0.12f, 0, 2.5f);
+    }
 }
 
 AeroStrike::SimCore::WeaponVariantSpec UWeaponLoadoutComponent::BuildSimVariant(int32 SlotIdx) const
@@ -118,6 +155,17 @@ AeroStrike::SimCore::WeaponVariantSpec UWeaponLoadoutComponent::BuildSimVariant(
     AeroStrike::SimCore::WeaponVariantSpec Out;
     if (!EquippedVariants.IsValidIndex(SlotIdx) || !EquippedVariants[SlotIdx])
     {
+        if (SlotIdx == 0 && StateMachine.slots[0].weaponId == "aerostrike_training_gun")
+        {
+            Out.id = "aerostrike_training_gun";
+            Out.displayName = "Training Gun (Temporary)";
+            Out.domain = AeroStrike::SimCore::EWeaponDomain::ProjectileGuns;
+            Out.family = AeroStrike::SimCore::EWeaponFamily::FamilyA_LightweightUavGun;
+            Out.allowedFireModes = { AeroStrike::SimCore::EFireMode::Single, AeroStrike::SimCore::EFireMode::Auto };
+            Out.defaultFireMode = AeroStrike::SimCore::EFireMode::Auto;
+            Out.cooldownSec = 0.13;
+            Out.ammoPerSlot = 120;
+        }
         return Out;
     }
     const UWeaponVariantDataAsset* V = EquippedVariants[SlotIdx];
@@ -163,6 +211,10 @@ void UWeaponLoadoutComponent::DispatchSimEvents(const std::vector<AeroStrike::Si
             default:
                 Kind = EWeaponEventKindBP::RoundFired;
                 break;
+        }
+        if (Kind == EWeaponEventKindBP::RoundFired)
+        {
+            UE_LOG(LogTemp, Display, TEXT("AeroStrike weapon event: slot %d fired; ammo remaining %d"), E.slotIndex, E.remainingAmmo);
         }
         MulticastWeaponEvent(Kind, E.slotIndex, FName(UTF8_TO_TCHAR(E.weaponId.c_str())), E.remainingAmmo);
     }

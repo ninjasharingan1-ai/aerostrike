@@ -191,7 +191,7 @@ inline std::array<std::string, 4> normalizeLoadoutSlots(
                 return w.id;
             }
         }
-        return catalog.empty() ? std::string{} : catalog.front().id;
+        return {}; // Explicitly unarmed if no compatible variant exists; never fabricate a valid loadout.
     };
 
     std::array<std::string, 4> out;

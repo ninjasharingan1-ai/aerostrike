@@ -56,6 +56,20 @@ void UAeroStrikeFlightComponent::SetManualOverrideInput(double Pitch, double Rol
     ManualInput.throttleDelta = ThrottleDelta;
 }
 
+FVector2D UAeroStrikeFlightComponent::ConsumeFreeLookDeltaRadians()
+{
+    const FVector2D Result = PendingFreeLookDeltaRad;
+    PendingFreeLookDeltaRad = FVector2D::ZeroVector;
+    return Result;
+}
+
+FVector2D UAeroStrikeFlightComponent::ConsumeEoirDeltaRadians()
+{
+    const FVector2D Result = PendingEoirDeltaRad;
+    PendingEoirDeltaRad = FVector2D::ZeroVector;
+    return Result;
+}
+
 void UAeroStrikeFlightComponent::SetFlightPreset(bool bRealistic)
 {
     EnvCtx.preset = bRealistic ? AeroStrike::SimCore::EFlightPreset::Realistic : AeroStrike::SimCore::EFlightPreset::Arcade;
@@ -88,6 +102,8 @@ void UAeroStrikeFlightComponent::TickComponent(
     MouseCfg.freeLookSensitivity = FreeLookSensitivity;
     MouseCfg.invertY = bInvertY;
     const auto Consumed = AeroStrike::SimCore::consumeMouseFrameInput(MouseState, MouseCfg);
+    PendingFreeLookDeltaRad += FVector2D(Consumed.freeLookDeltaYawRad, Consumed.freeLookDeltaPitchRad);
+    PendingEoirDeltaRad += FVector2D(Consumed.eoirDeltaYawRad, Consumed.eoirDeltaPitchRad);
 
     AeroStrike::SimCore::MouseAimStepInput AimStep;
     AimStep.aimYaw = DesiredAimYawRad;

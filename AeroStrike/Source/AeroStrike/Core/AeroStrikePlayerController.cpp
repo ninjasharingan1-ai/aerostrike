@@ -4,6 +4,8 @@
 #include "Aircraft/AeroStrikeUavPawn.h"
 #include "Flight/AeroStrikeFlightComponent.h"
 #include "Weapons/WeaponLoadoutComponent.h"
+#include "Components/InputComponent.h"
+#include "InputCoreTypes.h"
 
 void AAeroStrikePlayerController::BeginPlay()
 {
@@ -18,6 +20,24 @@ void AAeroStrikePlayerController::BeginPlay()
     }
     FInputModeGameOnly GameModeInput;
     SetInputMode(GameModeInput);
+    bShowMouseCursor = false;
+    bPointerCaptured = true;
+    if (AAeroStrikeUavPawn* Uav = GetUavPawn())
+    {
+        if (auto* Flight = Uav->GetFlightComponent()) Flight->OnPointerLockChanged(true);
+    }
+}
+
+void AAeroStrikePlayerController::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    AAeroStrikeUavPawn* Uav = GetUavPawn();
+    if (!Uav || !Uav->GetFlightComponent()) return;
+    const double Pitch = (IsInputKeyDown(EKeys::W) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::S) ? 1.0 : 0.0);
+    const double Roll = (IsInputKeyDown(EKeys::D) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::A) ? 1.0 : 0.0);
+    const double Yaw = (IsInputKeyDown(EKeys::E) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::Q) ? 1.0 : 0.0);
+    const double Throttle = IsInputKeyDown(EKeys::LeftShift) ? 0.5 : 0.0;
+    Uav->GetFlightComponent()->SetManualOverrideInput(Pitch, Roll, Yaw, Throttle);
 }
 
 void AAeroStrikePlayerController::SetupInputComponent()
@@ -45,13 +65,44 @@ void AAeroStrikePlayerController::SetupInputComponent()
         if (IA_SelectSlot3) EIC->BindActionValueLambda(IA_SelectSlot3, ETriggerEvent::Started, [this](const FInputActionValue&) { SelectWeaponSlot(2); });
         if (IA_SelectSlot4) EIC->BindActionValueLambda(IA_SelectSlot4, ETriggerEvent::Started, [this](const FInputActionValue&) { SelectWeaponSlot(3); });
     }
+
+    // Bootstrap a playable UE scene without relying on missing IA_*/IMC_*.uasset content.
+    // Once authored input assets are supplied, each corresponding fallback is disabled.
+    if (!IA_AimLook)
+    {
+        InputComponent->BindAxisKey(EKeys::MouseX, this, &ThisClass::FallbackMouseX);
+        InputComponent->BindAxisKey(EKeys::MouseY, this, &ThisClass::FallbackMouseY);
+    }
+    if (!IA_FirePrimary)
+    {
+        InputComponent->BindKey(EKeys::LeftMouseButton, IE_Pressed, this, &ThisClass::FallbackFirePressed);
+        InputComponent->BindKey(EKeys::LeftMouseButton, IE_Released, this, &ThisClass::FallbackFireReleased);
+        InputComponent->BindKey(EKeys::SpaceBar, IE_Pressed, this, &ThisClass::FallbackFirePressed);
+        InputComponent->BindKey(EKeys::SpaceBar, IE_Released, this, &ThisClass::FallbackFireReleased);
+    }
+    if (!IA_CycleFireMode) InputComponent->BindKey(EKeys::R, IE_Pressed, this, &ThisClass::FallbackFireMode);
+    if (!IA_FreeLook)
+    {
+        InputComponent->BindKey(EKeys::C, IE_Pressed, this, &ThisClass::FallbackFreeLookStarted);
+        InputComponent->BindKey(EKeys::C, IE_Released, this, &ThisClass::FallbackFreeLookCompleted);
+    }
+    if (!IA_CycleCamera) InputComponent->BindKey(EKeys::U, IE_Pressed, this, &ThisClass::FallbackCycleCamera);
+    if (!IA_TogglePointerLock) InputComponent->BindKey(EKeys::L, IE_Pressed, this, &ThisClass::FallbackTogglePointerLock);
+    if (!IA_SelectSlot1) InputComponent->BindKey(EKeys::One, IE_Pressed, this, &ThisClass::FallbackSlotOne);
+    if (!IA_SelectSlot2) InputComponent->BindKey(EKeys::Two, IE_Pressed, this, &ThisClass::FallbackSlotTwo);
+    if (!IA_SelectSlot3) InputComponent->BindKey(EKeys::Three, IE_Pressed, this, &ThisClass::FallbackSlotThree);
+    if (!IA_SelectSlot4) InputComponent->BindKey(EKeys::Four, IE_Pressed, this, &ThisClass::FallbackSlotFour);
 }
 
 void AAeroStrikePlayerController::OnWindowFocusLost()
 {
     if (AAeroStrikeUavPawn* Uav = GetUavPawn())
     {
-        if (auto* Flight = Uav->GetFlightComponent()) Flight->OnWindowFocusLost();
+        if (auto* Flight = Uav->GetFlightComponent())
+        {
+            Flight->OnWindowFocusLost();
+            Flight->SetManualOverrideInput(0.0, 0.0, 0.0, 0.0);
+        }
         if (auto* Wep = Uav->GetWeaponComponent()) Wep->RequestPrimaryFireReleased();
     }
 }
@@ -66,7 +117,7 @@ void AAeroStrikePlayerController::HandleAimLook(const FInputActionValue& Value)
     AAeroStrikeUavPawn* Uav = GetUavPawn();
     if (!Uav || !Uav->GetFlightComponent()) return;
     const FVector2D Delta = Value.Get<FVector2D>();
-    double MouseX = 0.0, MouseY = 0.0;
+    float MouseX = 0.0f, MouseY = 0.0f;
     GetMousePosition(MouseX, MouseY);
     const bool bEoir = Uav->GetCameraMode() == EAeroStrikeCameraMode::EoirSensor;
     Uav->GetFlightComponent()->PushMousePointerDelta(MouseX, MouseY, Delta.X, -Delta.Y, Uav->IsFreeLookHeld(), bEoir);
@@ -128,3 +179,39 @@ void AAeroStrikePlayerController::SelectWeaponSlot(int32 SlotIdx)
         if (auto* Wep = Uav->GetWeaponComponent()) Wep->SelectSlot(SlotIdx);
     }
 }
+
+void AAeroStrikePlayerController::FallbackMouseX(float AxisValue)
+{
+    if (FMath::IsNearlyZero(AxisValue)) return;
+    AAeroStrikeUavPawn* Uav = GetUavPawn();
+    if (!Uav || !Uav->GetFlightComponent()) return;
+    float X = 0.0f, Y = 0.0f;
+    GetMousePosition(X, Y);
+    Uav->GetFlightComponent()->PushMousePointerDelta(
+        X, Y, AxisValue, 0.0, Uav->IsFreeLookHeld(),
+        Uav->GetCameraMode() == EAeroStrikeCameraMode::EoirSensor);
+}
+
+void AAeroStrikePlayerController::FallbackMouseY(float AxisValue)
+{
+    if (FMath::IsNearlyZero(AxisValue)) return;
+    AAeroStrikeUavPawn* Uav = GetUavPawn();
+    if (!Uav || !Uav->GetFlightComponent()) return;
+    float X = 0.0f, Y = 0.0f;
+    GetMousePosition(X, Y);
+    Uav->GetFlightComponent()->PushMousePointerDelta(
+        X, Y, 0.0, -AxisValue, Uav->IsFreeLookHeld(),
+        Uav->GetCameraMode() == EAeroStrikeCameraMode::EoirSensor);
+}
+
+void AAeroStrikePlayerController::FallbackFirePressed() { HandleFirePressed(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackFireReleased() { HandleFireReleased(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackFireMode() { HandleCycleFireMode(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackFreeLookStarted() { HandleFreeLookStarted(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackFreeLookCompleted() { HandleFreeLookCompleted(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackCycleCamera() { HandleCycleCamera(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackTogglePointerLock() { HandleTogglePointerLock(FInputActionValue()); }
+void AAeroStrikePlayerController::FallbackSlotOne() { SelectWeaponSlot(0); }
+void AAeroStrikePlayerController::FallbackSlotTwo() { SelectWeaponSlot(1); }
+void AAeroStrikePlayerController::FallbackSlotThree() { SelectWeaponSlot(2); }
+void AAeroStrikePlayerController::FallbackSlotFour() { SelectWeaponSlot(3); }

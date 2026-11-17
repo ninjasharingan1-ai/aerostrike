@@ -74,6 +74,9 @@ protected:
     UFUNCTION(Server, Reliable)
     void ServerSelectSlot(int32 NewSlotIndex);
 
+    UFUNCTION(Server, Reliable)
+    void ServerCycleActiveFireMode();
+
     UFUNCTION(NetMulticast, Reliable)
     void MulticastWeaponEvent(EWeaponEventKindBP EventKind, int32 SlotIndex, FName WeaponId, int32 RemainingAmmo);
 

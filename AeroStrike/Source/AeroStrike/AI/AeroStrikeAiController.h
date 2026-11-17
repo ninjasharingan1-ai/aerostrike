@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "AIController.h"
-#include "SimCore/DroneFlightModel.h"
+#include "Aircraft/AeroStrikeAirframeDataAsset.h"
 #include "AeroStrikeAiController.generated.h"
 
 UENUM(BlueprintType)
@@ -25,7 +25,7 @@ public:
     EAeroStrikeAiRole AiRole = EAeroStrikeAiRole::Dogfighter;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "AeroStrike|AI")
-    AeroStrike::SimCore::EFlightModelFamily FlightClass = AeroStrike::SimCore::EFlightModelFamily::FixedWingPropeller;
+    EAeroStrikeFlightClass FlightClass = EAeroStrikeFlightClass::FixedWingPropeller;
 
     UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "AeroStrike|AI")
     int32 TeamId = 1; // 0 = Alpha (Allied), 1 = Bravo (Hostile)

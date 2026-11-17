@@ -11,4 +11,10 @@ class AEROSTRIKE_API AAeroStrikeGameModeBase : public AGameModeBase
 
 public:
     AAeroStrikeGameModeBase();
+    virtual void BeginPlay() override;
+
+protected:
+    // Disabled when the authored Sector04_Mojave world map is ready.
+    UPROPERTY(EditDefaultsOnly, Category = "Bootstrap")
+    bool bEnableTrainingBootstrap = true;
 };
