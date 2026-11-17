@@ -5,6 +5,7 @@
 #include "AeroStrikeUavPawn.generated.h"
 
 class USkeletalMeshComponent;
+class UStaticMeshComponent;
 class USpringArmComponent;
 class UCameraComponent;
 class UAeroStrikeFlightComponent;
@@ -54,6 +55,16 @@ public:
 protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USkeletalMeshComponent> AirframeMesh;
+
+    // Visible training proxy until licensed production skeletal meshes are imported.
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bootstrap")
+    TObjectPtr<UStaticMeshComponent> FallbackFuselage;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bootstrap")
+    TObjectPtr<UStaticMeshComponent> FallbackWings;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Bootstrap")
+    TObjectPtr<UStaticMeshComponent> FallbackTail;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
     TObjectPtr<USpringArmComponent> ChaseSpringArm;
