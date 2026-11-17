@@ -1,0 +1,54 @@
+[
+  {
+    "id": "eoir_das4",
+    "name": "WESCAM MX-15 / AN/DAS-4 EO/IR",
+    "type": "Optical & Laser Designator",
+    "lockRangeM": 5200,
+    "lockConeDeg": 32,
+    "weatherPenetration": 0.52,
+    "solarEfficiencyBonus": 1,
+    "massKg": 62,
+    "unlockCostRc": 0,
+    "requiredRank": 1,
+    "description": "Stabilized gimbal laser target designator with crisp thermal imaging for MAM-L, KAB-20, and Spike missile locks."
+  },
+  {
+    "id": "solar_optical",
+    "name": "Helios-3 Solar-Flux Optical Array",
+    "type": "Photovoltaic + Star Tracker",
+    "lockRangeM": 5600,
+    "lockConeDeg": 34,
+    "weatherPenetration": 0.58,
+    "solarEfficiencyBonus": 1.75,
+    "massKg": 55,
+    "unlockCostRc": 250,
+    "requiredRank": 1,
+    "description": "Dual-use astronomical star-tracker and photovoltaic collector boosting solar regeneration by 75%."
+  },
+  {
+    "id": "aesa_apg81",
+    "name": "EL/M-2055 SAR/GMTI + AESA Radar",
+    "type": "Active Phased Array",
+    "lockRangeM": 8800,
+    "lockConeDeg": 48,
+    "weatherPenetration": 0.94,
+    "solarEfficiencyBonus": 1,
+    "massKg": 98,
+    "unlockCostRc": 600,
+    "requiredRank": 2,
+    "description": "All-weather active electronically scanned array penetrating thunderstorms and desert dust clouds."
+  },
+  {
+    "id": "ew_jammer",
+    "name": "AN/ALQ-249 / Krasukha EW Pod",
+    "type": "Electronic Countermeasures",
+    "lockRangeM": 6800,
+    "lockConeDeg": 40,
+    "weatherPenetration": 0.85,
+    "solarEfficiencyBonus": 1.1,
+    "massKg": 84,
+    "unlockCostRc": 900,
+    "requiredRank": 3,
+    "description": "Broad-spectrum DRFM jammer that degrades incoming SAM seeker locks while maintaining long-range cyber datalink."
+  }
+]

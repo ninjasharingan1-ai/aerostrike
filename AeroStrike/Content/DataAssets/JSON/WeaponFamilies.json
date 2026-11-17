@@ -1,0 +1,65 @@
+[
+  {
+    "FamilyId": "FamilyA_LightweightUavGun",
+    "Domain": "ProjectileGuns",
+    "Badge": "CAT A",
+    "Title": "Light Rifle-Class Drone Guns",
+    "ReferenceSystems": "ASİSGUARD SONGAR 5.56 Ref",
+    "Summary": "Lightweight 5.56mm stabilized gimbals for multirotors & light tactical UAVs.",
+    "UsesRotarySpinUp": false
+  },
+  {
+    "FamilyId": "FamilyB_MediumUavMachineGun",
+    "Domain": "ProjectileGuns",
+    "Badge": "CAT B",
+    "Title": "Heavy Multirotor Weapon Stations",
+    "ReferenceSystems": "SONGAR 7.62 / Duke TIKAD Ref",
+    "Summary": "Stabilized 7.62mm / enclosed recoil-damped weapon stations for heavy hover-capable drones.",
+    "UsesRotarySpinUp": false
+  },
+  {
+    "FamilyId": "FamilyC_RotaryAircraftGunPod",
+    "Domain": "ProjectileGuns",
+    "Badge": "CAT C",
+    "Title": "Heavy Rotary Aircraft Gun Pods",
+    "ReferenceSystems": "GA Mojave + Dillon Aero DAP-6 Ref",
+    "Summary": "High-rate 6-barrel rotary gun pods verified strictly for Mojave / MQ-9X / Heavy Pod UAVs.",
+    "UsesRotarySpinUp": true
+  },
+  {
+    "FamilyId": "FamilyD_TacticalRwsTurret",
+    "Domain": "ProjectileGuns",
+    "Badge": "CAT D",
+    "Title": "Compact Tactical Remote Weapon Stations",
+    "ReferenceSystems": "IAI / SIG FIRE STORM 250 · M250 Ref",
+    "Summary": "Low-profile gyro-stabilized electro-optical RWS turrets for tactical & heavy UAVs.",
+    "UsesRotarySpinUp": false
+  },
+  {
+    "FamilyId": "FamilyE_GuidedGameOrdnance",
+    "Domain": "GuidedOrdnance",
+    "Badge": "FAMILY E",
+    "Title": "Guided Game Ordnance (ATGMs / AAMs / Cruise / Ballistic)",
+    "ReferenceSystems": "Fictionalized standoff guided munitions",
+    "Summary": "Shared guided ordnance contract for rail launch, seeker lock, cooldown, and replication.",
+    "UsesRotarySpinUp": false
+  },
+  {
+    "FamilyId": "FamilyF_BombAndReleaseSystem",
+    "Domain": "ReleaseOrdnance",
+    "Badge": "FAMILY F",
+    "Title": "Bomb & Release Systems (Glide & Drop Munitions)",
+    "ReferenceSystems": "Fictionalized unpowered glide and drop racks",
+    "Summary": "Gravity release and deployable wing-glide munitions separate from automatic gunfire.",
+    "UsesRotarySpinUp": false
+  },
+  {
+    "FamilyId": "FamilyG_DefensiveAndUtility",
+    "Domain": "DefensiveUtility",
+    "Badge": "FAMILY G",
+    "Title": "Defensive Countermeasures & EO/IR Utility",
+    "ReferenceSystems": "IR Flares & EO/IR Target Designator",
+    "Summary": "Non-lethal defensive flares and optical sensor utilities decoupled from primary weapon fire.",
+    "UsesRotarySpinUp": false
+  }
+]

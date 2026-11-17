@@ -1,0 +1,700 @@
+[
+  {
+    "WeaponId": "mam_l",
+    "DisplayName": "Roketsan MAM-L Smart Munition",
+    "NatoCode": "MAM-L Laser",
+    "Origin": "Ukraine / Turkey",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 0.95,
+    "MassKg": 22,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 115,
+      "WarheadKg": 10,
+      "BlastRadiusM": 58,
+      "InitialSpeedMs": 12,
+      "MaxRangeKm": 15,
+      "MachMax": 0.8
+    }
+  },
+  {
+    "WeaponId": "mam_c",
+    "DisplayName": "Roketsan MAM-C Armor-Piercing",
+    "NatoCode": "MAM-C Micro",
+    "Origin": "Ukraine / Turkey",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 0.65,
+    "MassKg": 6.5,
+    "AmmoPerSlot": 6,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 68,
+      "WarheadKg": 2.5,
+      "BlastRadiusM": 34,
+      "InitialSpeedMs": 15,
+      "MaxRangeKm": 8,
+      "MachMax": 0.75
+    }
+  },
+  {
+    "WeaponId": "pg7vl_drop",
+    "DisplayName": "PG-7VL + PTAB-2.5M Drop Rack",
+    "NatoCode": "HEAT Drop x8",
+    "Origin": "Ukraine / Frontline",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 0.45,
+    "MassKg": 2.6,
+    "AmmoPerSlot": 8,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 85,
+      "WarheadKg": 2.2,
+      "BlastRadiusM": 42,
+      "InitialSpeedMs": 2,
+      "MaxRangeKm": 2.5,
+      "MachMax": 0.6
+    }
+  },
+  {
+    "WeaponId": "spike_nlos",
+    "DisplayName": "Rafael Spike NLOS",
+    "NatoCode": "SPIKE-NLOS",
+    "Origin": "Israel",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.25,
+    "MassKg": 71,
+    "AmmoPerSlot": 3,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 145,
+      "WarheadKg": 18,
+      "BlastRadiusM": 64,
+      "InitialSpeedMs": 38,
+      "MaxRangeKm": 32,
+      "MachMax": 1.1
+    }
+  },
+  {
+    "WeaponId": "kab_20",
+    "DisplayName": "KAB-20S Guided Drone Bomb",
+    "NatoCode": "KAB-20S",
+    "Origin": "Russia",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1,
+    "MassKg": 21,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 105,
+      "WarheadKg": 7,
+      "BlastRadiusM": 52,
+      "InitialSpeedMs": 8,
+      "MaxRangeKm": 8,
+      "MachMax": 0.78
+    }
+  },
+  {
+    "WeaponId": "kornet_d",
+    "DisplayName": "9M133FM-3 Kornet-D ATGM",
+    "NatoCode": "AT-14 Kornet",
+    "Origin": "Russia / Syria",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.15,
+    "MassKg": 29,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 135,
+      "WarheadKg": 10,
+      "BlastRadiusM": 54,
+      "InitialSpeedMs": 42,
+      "MaxRangeKm": 10,
+      "MachMax": 1
+    }
+  },
+  {
+    "WeaponId": "qaem_5",
+    "DisplayName": "Qaem-5 TV/IR Guided Bomb",
+    "NatoCode": "QAEM-5",
+    "Origin": "Iran / Syria",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1,
+    "MassKg": 20,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 102,
+      "WarheadKg": 8.5,
+      "BlastRadiusM": 50,
+      "InitialSpeedMs": 10,
+      "MaxRangeKm": 12,
+      "MachMax": 0.72
+    }
+  },
+  {
+    "WeaponId": "r73_archer",
+    "DisplayName": "Vympel R-73 (AA-11 Archer)",
+    "NatoCode": "R-73E IIR",
+    "Origin": "Ukraine / Russia",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.35,
+    "MassKg": 105,
+    "AmmoPerSlot": 2,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 105,
+      "WarheadKg": 8,
+      "BlastRadiusM": 40,
+      "InitialSpeedMs": 52,
+      "MaxRangeKm": 30,
+      "MachMax": 2.5
+    }
+  },
+  {
+    "WeaponId": "agm114_hellfire",
+    "DisplayName": "AGM-114R Hellfire II",
+    "NatoCode": "SAL-ATGM",
+    "Origin": "USA",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.05,
+    "MassKg": 49,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 110,
+      "WarheadKg": 9,
+      "BlastRadiusM": 48,
+      "InitialSpeedMs": 40,
+      "MaxRangeKm": 11,
+      "MachMax": 1.3
+    }
+  },
+  {
+    "WeaponId": "gbu39_sdb",
+    "DisplayName": "GBU-39B SDB Glide Bomb",
+    "NatoCode": "INS/GPS Glide",
+    "Origin": "USA / Israel / Ukraine",
+    "Domain": "ReleaseOrdnance",
+    "WeaponFamily": "FamilyF_BombAndReleaseSystem",
+    "AudioProfile": "glide_release",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.25,
+    "MassKg": 130,
+    "AmmoPerSlot": 4,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 135,
+      "WarheadKg": 93,
+      "BlastRadiusM": 75,
+      "InitialSpeedMs": 0,
+      "MaxRangeKm": 110,
+      "MachMax": 0.9
+    }
+  },
+  {
+    "WeaponId": "songar_556",
+    "DisplayName": "SONGAR-556 Stabilized Rifle Gimbal",
+    "NatoCode": "5.56mm NATO",
+    "Origin": "ASİSGUARD / Tactical Ref",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyA_LightweightUavGun",
+    "AudioProfile": "gun_light_556",
+    "CompatibleAirframeClasses": [
+      "light_multirotor",
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "baba_yaga",
+      "punisher_ua",
+      "bayraktar_tb2",
+      "mohajer_6",
+      "zala_lancet"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "single",
+      "burst",
+      "auto"
+    ],
+    "DefaultFireMode": "burst",
+    "BurstCount": 3,
+    "BurstIntervalSec": 0.085,
+    "CooldownSec": 0.11,
+    "MassKg": 18,
+    "AmmoPerSlot": 120,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 11,
+      "WarheadKg": 0.04,
+      "BlastRadiusM": 7,
+      "InitialSpeedMs": 620,
+      "MaxRangeKm": 1.4,
+      "MachMax": 2.8
+    }
+  },
+  {
+    "WeaponId": "songar_762",
+    "DisplayName": "SONGAR-762 / GMG Heavy Station",
+    "NatoCode": "7.62mm NATO",
+    "Origin": "ASİSGUARD / Heavy Ref",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyB_MediumUavMachineGun",
+    "AudioProfile": "gun_medium_762",
+    "CompatibleAirframeClasses": [
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "baba_yaga",
+      "bayraktar_tb2",
+      "mohajer_6",
+      "mojave_ucav",
+      "mq9x"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "single",
+      "burst",
+      "auto"
+    ],
+    "DefaultFireMode": "auto",
+    "BurstCount": 3,
+    "BurstIntervalSec": 0.095,
+    "CooldownSec": 0.13,
+    "MassKg": 28,
+    "AmmoPerSlot": 100,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 16,
+      "WarheadKg": 0.07,
+      "BlastRadiusM": 10,
+      "InitialSpeedMs": 590,
+      "MaxRangeKm": 1.8,
+      "MachMax": 2.7
+    }
+  },
+  {
+    "WeaponId": "tikad_mg",
+    "DisplayName": "TIKAD Enclosed Weapon Station",
+    "NatoCode": "TIKAD RWS",
+    "Origin": "Israel / Duke Ref",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyB_MediumUavMachineGun",
+    "AudioProfile": "gun_enclosed_mg",
+    "CompatibleAirframeClasses": [
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "baba_yaga",
+      "hermes_900",
+      "bayraktar_tb2",
+      "mojave_ucav"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "single",
+      "burst",
+      "auto"
+    ],
+    "DefaultFireMode": "burst",
+    "BurstCount": 3,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 0.14,
+    "MassKg": 32,
+    "AmmoPerSlot": 90,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 18,
+      "WarheadKg": 0.08,
+      "BlastRadiusM": 9,
+      "InitialSpeedMs": 615,
+      "MaxRangeKm": 2,
+      "MachMax": 2.7
+    }
+  },
+  {
+    "WeaponId": "dap6_minigun_pod",
+    "DisplayName": "Dillon Aero DAP-6 Rotary Gun Pod",
+    "NatoCode": "DAP-6 7.62",
+    "Origin": "USA / Mojave Ref",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyC_RotaryAircraftGunPod",
+    "AudioProfile": "gun_rotary_minigun",
+    "CompatibleAirframeClasses": [
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "mojave_ucav",
+      "mq9x",
+      "akinci",
+      "hermes_900",
+      "orion_ru"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "auto"
+    ],
+    "DefaultFireMode": "auto",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 0.055,
+    "MassKg": 118,
+    "AmmoPerSlot": 240,
+    "RotaryBarrels": 6,
+    "FictionalGameStats": {
+      "Damage": 15,
+      "WarheadKg": 0.08,
+      "BlastRadiusM": 12,
+      "InitialSpeedMs": 650,
+      "MaxRangeKm": 2.2,
+      "MachMax": 2.9
+    }
+  },
+  {
+    "WeaponId": "fire_storm_250",
+    "DisplayName": "FIRE STORM 250 / M250 RWS",
+    "NatoCode": "FS-250 6.8mm",
+    "Origin": "Israel / SIG Ref",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyD_TacticalRwsTurret",
+    "AudioProfile": "gun_rws_250",
+    "CompatibleAirframeClasses": [
+      "heavy_multirotor",
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "bayraktar_tb2",
+      "hermes_900",
+      "baba_yaga",
+      "mohajer_6",
+      "mojave_ucav",
+      "mq9x"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "single",
+      "burst",
+      "auto"
+    ],
+    "DefaultFireMode": "auto",
+    "BurstCount": 3,
+    "BurstIntervalSec": 0.08,
+    "CooldownSec": 0.11,
+    "MassKg": 26,
+    "AmmoPerSlot": 110,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 19,
+      "WarheadKg": 0.08,
+      "BlastRadiusM": 10,
+      "InitialSpeedMs": 660,
+      "MaxRangeKm": 2.2,
+      "MachMax": 2.9
+    }
+  },
+  {
+    "WeaponId": "m61_vulcan",
+    "DisplayName": "20mm M61A2 / GSh-23 Autocannon Pod",
+    "NatoCode": "20mm HEI-T",
+    "Origin": "USA / Ukraine",
+    "Domain": "ProjectileGuns",
+    "WeaponFamily": "FamilyC_RotaryAircraftGunPod",
+    "AudioProfile": "cannon_20mm",
+    "CompatibleAirframeClasses": [
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [
+      "akinci",
+      "mq9x",
+      "mojave_ucav",
+      "xq58a",
+      "switchblade_x"
+    ],
+    "HistoricallyDocumentedAuditNote": "Explicitly documented list provided; check strictly against HistoricallyDocumentedAirframeIds.",
+    "AllowedFireModes": [
+      "burst",
+      "auto"
+    ],
+    "DefaultFireMode": "auto",
+    "BurstCount": 4,
+    "BurstIntervalSec": 0.065,
+    "CooldownSec": 0.09,
+    "MassKg": 132,
+    "AmmoPerSlot": 80,
+    "RotaryBarrels": 6,
+    "FictionalGameStats": {
+      "Damage": 22,
+      "WarheadKg": 0.12,
+      "BlastRadiusM": 14,
+      "InitialSpeedMs": 560,
+      "MaxRangeKm": 2.4,
+      "MachMax": 3
+    }
+  },
+  {
+    "WeaponId": "aim9x_sidewinder",
+    "DisplayName": "AIM-9X Sidewinder Block II",
+    "NatoCode": "IIR-AAM",
+    "Origin": "USA / Israel",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "tactical_uav",
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 1.35,
+    "MassKg": 85,
+    "AmmoPerSlot": 2,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 100,
+      "WarheadKg": 9.4,
+      "BlastRadiusM": 38,
+      "InitialSpeedMs": 55,
+      "MaxRangeKm": 35,
+      "MachMax": 2.5
+    }
+  },
+  {
+    "WeaponId": "agm158_jassm",
+    "DisplayName": "AGM-158A JASSM / Storm Shadow",
+    "NatoCode": "ALCM-Stealth",
+    "Origin": "USA / Ukraine",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "heavy_pod_uav",
+      "stealth_jet"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 2.1,
+    "MassKg": 1020,
+    "AmmoPerSlot": 2,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 185,
+      "WarheadKg": 450,
+      "BlastRadiusM": 115,
+      "InitialSpeedMs": 30,
+      "MaxRangeKm": 370,
+      "MachMax": 0.85
+    }
+  },
+  {
+    "WeaponId": "mim140_ballistic",
+    "DisplayName": "Air-Launched ATACMS / TBM-140",
+    "NatoCode": "ALBM-Tactical",
+    "Origin": "USA / Ukraine",
+    "Domain": "GuidedOrdnance",
+    "WeaponFamily": "FamilyE_GuidedGameOrdnance",
+    "AudioProfile": "ordnance_launch",
+    "CompatibleAirframeClasses": [
+      "heavy_pod_uav"
+    ],
+    "HistoricallyDocumentedAirframeIds": [],
+    "HistoricallyDocumentedAuditNote": "UNVERIFIED_CLASS_COMPATIBLE_ONLY — Do not infer historical airframe verification from class compatibility.",
+    "AllowedFireModes": [
+      "single"
+    ],
+    "DefaultFireMode": "single",
+    "BurstCount": 1,
+    "BurstIntervalSec": 0.09,
+    "CooldownSec": 2.8,
+    "MassKg": 1450,
+    "AmmoPerSlot": 1,
+    "RotaryBarrels": 0,
+    "FictionalGameStats": {
+      "Damage": 260,
+      "WarheadKg": 500,
+      "BlastRadiusM": 155,
+      "InitialSpeedMs": 45,
+      "MaxRangeKm": 300,
+      "MachMax": 4.2
+    }
+  }
+]

@@ -1,0 +1,408 @@
+{
+  "schemaVersion": "2.5.0",
+  "generatedAtIso": "2026-11-17T20:16:15.567Z",
+  "note": "Canonical source asset database uniting Stage A/M2 visual & audio assets and reconciling all 22 bundled WAV stems.",
+  "visualRecords": [
+    {
+      "id": "tb2_lod0_glb",
+      "category": "hero_aircraft",
+      "name": "Bayraktar TB2 Hero Airframe (LOD0)",
+      "localPath": "/assets/models/bayraktar_tb2/bayraktar_tb2_lod0.glb",
+      "sourceUrl": "local://scripts/generateHeroTb2Glb.mjs",
+      "creatorOrOrigin": "AeroStrike Stage-A Original Parametric CAD Exporter",
+      "license": "ORIGINAL_CREATED (Project-Owned)",
+      "status": "ORIGINAL_CREATED",
+      "format": "glTF 2.0 Binary (.glb) — 2,908 tris, embedded 512px PBR PNGs",
+      "notes": "Public external proportions (12.0m wingspan, 6.5m length, inverted V-tail, twin booms, articulated control surfaces & EO/IR gimbal)."
+    },
+    {
+      "id": "tb2_lod1_glb",
+      "category": "hero_aircraft",
+      "name": "Bayraktar TB2 Hero Airframe (LOD1)",
+      "localPath": "/assets/models/bayraktar_tb2/bayraktar_tb2_lod1.glb",
+      "sourceUrl": "local://scripts/generateHeroTb2Glb.mjs",
+      "creatorOrOrigin": "AeroStrike Stage-A Original Parametric CAD Exporter",
+      "license": "ORIGINAL_CREATED (Project-Owned)",
+      "status": "ORIGINAL_CREATED",
+      "format": "glTF 2.0 Binary (.glb) — 1,612 tris, embedded 256px PBR PNGs",
+      "notes": "Medium-range LOD tier for THREE.LOD switcher (140m–480m)."
+    },
+    {
+      "id": "tb2_lod2_glb",
+      "category": "hero_aircraft",
+      "name": "Bayraktar TB2 Hero Airframe (LOD2)",
+      "localPath": "/assets/models/bayraktar_tb2/bayraktar_tb2_lod2.glb",
+      "sourceUrl": "local://scripts/generateHeroTb2Glb.mjs",
+      "creatorOrOrigin": "AeroStrike Stage-A Original Parametric CAD Exporter",
+      "license": "ORIGINAL_CREATED (Project-Owned)",
+      "status": "ORIGINAL_CREATED",
+      "format": "glTF 2.0 Binary (.glb) — 786 tris, embedded 128px PBR PNGs",
+      "notes": "Long-range silhouette LOD tier for THREE.LOD switcher (>480m)."
+    },
+    {
+      "id": "hdri_aarfontein_pan",
+      "category": "env_hdri",
+      "name": "Aarfontein Pan 1K HDRI SkyDome",
+      "localPath": "/assets/env/aarfontein_pan_1k.hdr",
+      "sourceUrl": "https://polyhaven.com/a/aarfontein_pan",
+      "creatorOrOrigin": "Poly Haven (Greg Zaal)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "Radiance HDR (.hdr) 1024x512",
+      "notes": "Arid pan sky IBL processed via PMREMGenerator into scene.environment."
+    },
+    {
+      "id": "tex_aerial_sand",
+      "category": "terrain_texture",
+      "name": "Aerial Sand 1K PBR Set (Diff/NorGL/Rough)",
+      "localPath": "/assets/textures/aerial_sand/aerial_sand_diff_1k.jpg",
+      "sourceUrl": "https://polyhaven.com/a/aerial_sand",
+      "creatorOrOrigin": "Poly Haven",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "1K JPEG PBR Set (3 maps)",
+      "notes": "High-desert basin sand base albedo, OpenGL normal, and roughness maps."
+    },
+    {
+      "id": "tex_aerial_ground_rock",
+      "category": "terrain_texture",
+      "name": "Aerial Ground Rock 1K PBR Set (Diff/NorGL/Rough)",
+      "localPath": "/assets/textures/aerial_ground_rock/aerial_ground_rock_diff_1k.jpg",
+      "sourceUrl": "https://polyhaven.com/a/aerial_ground_rock",
+      "creatorOrOrigin": "Poly Haven",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "1K JPEG PBR Set (3 maps)",
+      "notes": "Slope-splatted desert ridge rock albedo, normal, and roughness maps."
+    },
+    {
+      "id": "tex_aerial_asphalt_01",
+      "category": "terrain_texture",
+      "name": "Aerial Asphalt 01 1K PBR Set (Diff/NorGL/Rough)",
+      "localPath": "/assets/textures/aerial_asphalt_01/aerial_asphalt_01_diff_1k.jpg",
+      "sourceUrl": "https://polyhaven.com/a/aerial_asphalt_01",
+      "creatorOrOrigin": "Poly Haven",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "1K JPEG PBR Set (3 maps)",
+      "notes": "Used on Mesa Dry Lake Airfield runway & concrete tarmac apron."
+    },
+    {
+      "id": "prop_boulder_01",
+      "category": "prop_model",
+      "name": "Scanned Boulder 01 1K glTF",
+      "localPath": "/assets/models/props/boulder_01/boulder_01_1k.gltf",
+      "sourceUrl": "https://polyhaven.com/a/boulder_01",
+      "creatorOrOrigin": "Poly Haven",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "glTF 2.0 + .bin + 1K ARM/Diff/NorGL JPEGs",
+      "notes": "Instanced cleanly in Sector 04 near airfield/perimeter outcrops with bounded instance count."
+    },
+    {
+      "id": "prop_barrel_01",
+      "category": "prop_model",
+      "name": "Industrial Drum Barrel 01 1K glTF",
+      "localPath": "/assets/models/props/barrel_01/Barrel_01_1k.gltf",
+      "sourceUrl": "https://polyhaven.com/a/Barrel_01",
+      "creatorOrOrigin": "Poly Haven",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "glTF 2.0 + .bin + 1K ARM/Diff/NorGL JPEGs",
+      "notes": "Instanced around Sector 04 Forward Logistics Depot and Mesa Airfield aprons."
+    },
+    {
+      "id": "ref_tb2_diagrams",
+      "category": "reference_pack",
+      "name": "Bayraktar TB2 3-View & EO/IR Turret Reference Imagery",
+      "localPath": "/public/assets/aistudio/AeroStrike_Gemini_Consolidated_Reference_Pack_01821623.pdf",
+      "sourceUrl": "local://AeroStrike_Gemini_Consolidated_Reference_Pack_01821623.pdf",
+      "creatorOrOrigin": "Defense editorial & technical manual photography",
+      "license": "Editorial / Reference Only",
+      "status": "REFERENCE_ONLY",
+      "format": "PDF Consolidated Reference Pack",
+      "notes": "Used strictly for external silhouette, wing dihedral, V-tail angle, and palette verification; never distributed as runtime textures."
+    },
+    {
+      "id": "missing_pbr_tb2_factory_mesh",
+      "category": "hero_aircraft",
+      "name": "Commercial 3D Studio Photogrammetry TB2 Mesh (Sketchfab/Turbosquid)",
+      "localPath": null,
+      "sourceUrl": "N/A — Non-CC0 / Commercial store listings excluded by license gate",
+      "creatorOrOrigin": "Third-party commercial marketplaces",
+      "license": "Proprietary / Standard Store License",
+      "status": "MISSING_SOURCE",
+      "format": "External Store FBX/OBJ",
+      "notes": "Replaced cleanly in Stage A with ORIGINAL_CREATED parametric CAD .glb LOD0/LOD1/LOD2 + Poly Haven PBR materials."
+    }
+  ],
+  "audioRecords": [
+    {
+      "id": "wav_prop_turboprop_near",
+      "category": "audio_sample",
+      "name": "Propeller Aircraft Near Loop (Crossfaded CC0)",
+      "localPath": "/assets/audio/prop_turboprop_near.wav",
+      "sourceUrl": "https://opengameart.org/content/war-on-water-sndfx",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (War on Water SNDFX — airplane1.ogg)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (3.0s crossfaded loop)",
+      "notes": "Close-range propeller loop crossfaded via ffmpeg for clickless chase-camera playback."
+    },
+    {
+      "id": "wav_prop_turboprop_far",
+      "category": "audio_sample",
+      "name": "Distant Engine Bed Loop (Crossfaded CC0)",
+      "localPath": "/assets/audio/prop_turboprop_far.wav",
+      "sourceUrl": "https://opengameart.org/content/engine-sounds2",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (engine-sounds2 — engine_sound.mp3)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (3.3s low-passed loop)",
+      "notes": "Distant low-passed engine rumble for far flyby and EO/IR interior sensor crossfading."
+    },
+    {
+      "id": "wav_desert_wind_loop",
+      "category": "audio_sample",
+      "name": "High-Desert Wind Ambience Loop (Crossfaded CC0)",
+      "localPath": "/assets/audio/desert_wind_loop.wav",
+      "sourceUrl": "https://opengameart.org/content/wind-whoosh-loop",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (wind-whoosh-loop)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (2.7s crossfaded loop)",
+      "notes": "Speed-scaled airflow and open-basin desert wind bed on ambience bus."
+    },
+    {
+      "id": "wav_gun_profile_recordings",
+      "category": "audio_sample",
+      "name": "Real-Recorded CC0 Gun Stems (5.56mm, 7.62mm SKS, Mosin, Enclosed MG, Rotary, 20mm Cannon)",
+      "localPath": "/assets/audio/gun_762.wav",
+      "sourceUrl": "https://opengameart.org/content/gunshot-sounds",
+      "creatorOrOrigin": "Raassh (gunshot-sounds: cz.wav, sks.wav, mosin.wav), cannon-fire (cannon_fire_0.ogg), & War on Water SNDFX",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (9 stems incl. layered transient/body/tail)",
+      "notes": "Zero-crossing transient-trimmed single shots routed per GunAudioProfile via HRTF PannerNode + Doppler."
+    },
+    {
+      "id": "wav_cannon_20mm_heavy",
+      "category": "audio_sample",
+      "name": "20mm Rotary Cannon Report (CC0)",
+      "localPath": "/assets/audio/cannon_20mm.wav",
+      "sourceUrl": "https://opengameart.org/content/cannon-fire",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (cannon-fire — cannon_fire_0.ogg)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (0.78s)",
+      "notes": "Heavy autocannon punch and desert canyon tail layered with cannon_body & cannon_tail."
+    },
+    {
+      "id": "wav_missile_launch_cc0",
+      "category": "audio_sample",
+      "name": "Rocket / Missile Ignition & Whoosh (CC0)",
+      "localPath": "/assets/audio/missile_launch.wav",
+      "sourceUrl": "https://opengameart.org/content/missile-sound",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (missile-sound — missile.wav)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (1.75s)",
+      "notes": "Spatialized at launch rail world coordinates from SimWorld missile events."
+    },
+    {
+      "id": "wav_explosion_sub_cc0",
+      "category": "audio_sample",
+      "name": "Muffled Distant Explosion Sub-Boom (CC0)",
+      "localPath": "/assets/audio/explosion_sub.wav",
+      "sourceUrl": "https://opengameart.org/content/muffled-distant-explosion",
+      "creatorOrOrigin": "NenadSimic / Cokabear (Muffled Distant Explosion.wav)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (2.10s low-passed)",
+      "notes": "Sub-bass shockwave boom layered on explosion bus with automatic propulsion/ambience ducking."
+    },
+    {
+      "id": "wav_explosion_crack_cc0",
+      "category": "audio_sample",
+      "name": "Heavy Ordnance Detonation Blast (CC0)",
+      "localPath": "/assets/audio/explosion_crack.wav",
+      "sourceUrl": "https://opengameart.org/content/chunky-explosion",
+      "creatorOrOrigin": "looneybits (Chunky Explosion.mp3)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (1.60s)",
+      "notes": "High-impact transient blast layered with explosion_sub and explosion_debris."
+    },
+    {
+      "id": "wav_explosion_debris_and_flak",
+      "category": "audio_sample",
+      "name": "Detonation Debris Tail & AAA Airburst (CC0)",
+      "localPath": "/assets/audio/explosion_debris.wav",
+      "sourceUrl": "https://opengameart.org/content/war-on-water-sndfx",
+      "creatorOrOrigin": "OpenGameArt CC0 contributor (War on Water SNDFX — boatexplode.ogg, aiplaneexplode.ogg)",
+      "license": "CC0 1.0 Universal",
+      "status": "LICENSE_VERIFIED_FOR_GAME",
+      "format": "16-bit 44.1kHz Mono PCM WAV (2 stems)",
+      "notes": "Spatialized shrapnel/ejecta crackle and ground AAA airburst flak pops."
+    },
+    {
+      "id": "wav_avionics_ui_tones",
+      "category": "audio_sample",
+      "name": "Avionics Alert, Glide Release, Flare Pop, RWR & Hit Confirm Stems",
+      "localPath": "/assets/audio/rwr_chirp.wav",
+      "sourceUrl": "local://scripts/generateStageAAudioSamples.ts",
+      "creatorOrOrigin": "AeroStrike Original Avionics Synth",
+      "license": "ORIGINAL_CREATED",
+      "status": "ORIGINAL_CREATED",
+      "format": "16-bit 44.1kHz Mono PCM WAV (5 stems)",
+      "notes": "Crisp HUD avionics/telemetry tones routed through UI & weapons buses + DynamicsCompressorNode."
+    },
+    {
+      "id": "missing_freesound_cc0_field_recordings",
+      "category": "audio_sample",
+      "name": "Freesound CC0 Field Recordings (Breviceps, gis_sweden, qubodup, craigsmith, Kostrava, PLukx)",
+      "localPath": null,
+      "sourceUrl": "https://freesound.org (Requires interactive account download / API key)",
+      "creatorOrOrigin": "Respective Freesound CC0 contributors listed in Consolidated Reference Pack",
+      "license": "CC0 1.0 (Unbundled in container — API/Login required)",
+      "status": "MISSING_SOURCE",
+      "format": "WAV / FLAC Field Recordings",
+      "notes": "Unbundled due to Freesound auth gate; replaced by verified OpenGameArt CC0 1.0 real recordings above."
+    }
+  ],
+  "bundledAudioFilesCount": 22,
+  "bundledAudioFiles": [
+    {
+      "fileName": "aaa_flak_burst.wav",
+      "browserPath": "/assets/audio/aaa_flak_burst.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/aaa_flak_burst",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "cannon_20mm.wav",
+      "browserPath": "/assets/audio/cannon_20mm.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/cannon_20mm",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "cannon_body.wav",
+      "browserPath": "/assets/audio/cannon_body.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/cannon_body",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "cannon_tail.wav",
+      "browserPath": "/assets/audio/cannon_tail.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/cannon_tail",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "cannon_transient.wav",
+      "browserPath": "/assets/audio/cannon_transient.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/cannon_transient",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "cyber_alert.wav",
+      "browserPath": "/assets/audio/cyber_alert.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/cyber_alert",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "desert_wind_loop.wav",
+      "browserPath": "/assets/audio/desert_wind_loop.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/desert_wind_loop",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "explosion_crack.wav",
+      "browserPath": "/assets/audio/explosion_crack.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/explosion_crack",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "explosion_debris.wav",
+      "browserPath": "/assets/audio/explosion_debris.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/explosion_debris",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "explosion_sub.wav",
+      "browserPath": "/assets/audio/explosion_sub.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/explosion_sub",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "flare_pop.wav",
+      "browserPath": "/assets/audio/flare_pop.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/flare_pop",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "glide_release.wav",
+      "browserPath": "/assets/audio/glide_release.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/glide_release",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "gun_556.wav",
+      "browserPath": "/assets/audio/gun_556.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/gun_556",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "gun_762.wav",
+      "browserPath": "/assets/audio/gun_762.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/gun_762",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "gun_enclosed.wav",
+      "browserPath": "/assets/audio/gun_enclosed.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/gun_enclosed",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "gun_rotary.wav",
+      "browserPath": "/assets/audio/gun_rotary.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/gun_rotary",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "gun_rws_250.wav",
+      "browserPath": "/assets/audio/gun_rws_250.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/gun_rws_250",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "hit_confirm.wav",
+      "browserPath": "/assets/audio/hit_confirm.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/hit_confirm",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "missile_launch.wav",
+      "browserPath": "/assets/audio/missile_launch.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/missile_launch",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "prop_turboprop_far.wav",
+      "browserPath": "/assets/audio/prop_turboprop_far.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/prop_turboprop_far",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "prop_turboprop_near.wav",
+      "browserPath": "/assets/audio/prop_turboprop_near.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/prop_turboprop_near",
+      "replacesRequiredInM25E": true
+    },
+    {
+      "fileName": "rwr_chirp.wav",
+      "browserPath": "/assets/audio/rwr_chirp.wav",
+      "ue5TargetPath": "/Game/Audio/LegacyBaseline/rwr_chirp",
+      "replacesRequiredInM25E": true
+    }
+  ]
+}
