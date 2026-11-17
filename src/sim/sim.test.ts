@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { AUDIO_ASSET_MANIFEST, STAGE_A_PATHS } from '../assets/assetManifest';
 import { AIRFRAMES, DEFAULT_LOADOUT, WEAPONS } from './arsenalData';
 import { createAiBotSquadron, stepAiCombatBot } from './aiDogfight';
 import {
@@ -27,6 +30,13 @@ import {
 } from './mouseAimInput';
 import { groundHeightAt, THEATERS, worldToLatLon } from './geoTheaters';
 import {
+  GUN_SUBCATEGORIES,
+  checkWeaponCompatibility,
+  cycleFireMode,
+  getAllowedFireModes,
+  normalizeLoadoutConfig,
+} from './weaponCompatibility';
+import {
   awardSortieRewards,
   canUpgradeSkill,
   computePilotSkillBonuses,
@@ -51,10 +61,11 @@ import {
   MAX_RAW_FRAME_DT_SEC,
 } from './clock/fixedClock';
 import { SeededRng } from './clock/seededRng';
+import { evaluateConvoyKinematics } from './core/groundConvoys';
 import { SimStepInput, SimWorld } from './core/simWorld';
 import { applyGraphicsPreset } from './settings';
 import { computeAtmosphericGravity, computeSolarState } from './solarGravity';
-import { DroneFlightState, SandboxConfig } from './types';
+import { DroneFlightState, GunAudioProfile, SandboxConfig } from './types';
 
 const DEFAULT_SANDBOX: SandboxConfig = {
   enabled: false,
@@ -1285,6 +1296,347 @@ test('P0 Test H (Pointer Lock, Focus Recovery & Spike Rejection): lock transitio
   });
   assert.equal(postReenter.aimDeltaYawRad, 0);
 });
+
+// =============================================================================
+// M2.0 — LEFT MOUSE BUTTON FIRE & TRIGGER / SLOT / PHASE HYGIENE
+// =============================================================================
+
+test('M2.0 Test 1: Single-shot ordnance fires once on click and does NOT auto-repeat while held', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2001);
+  world.setActiveSlot(0); // mam_l (single-shot AGM, 4 rounds, cooldown 0.55s)
+  const initialAmmo = world.slotAmmo[0];
+  const res1 = world.fireActiveOrdnance(true, []);
+  assert.equal(res1.fired, true);
+  assert.equal(world.slotAmmo[0], initialAmmo - 1);
+  assert.equal(world.activeOrdnance.length, 1);
+
+  // Hold firingHeld across 2 seconds (> cooldown): single-shot must NOT repeat while held
+  for (let f = 0; f < 120; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  assert.equal(world.slotAmmo[0], initialAmmo - 1, 'Holding trigger on single-shot weapon must not fire extra rounds');
+});
+
+test('M2.0 Test 2: Automatic cannon sustains firing while held and stops immediately on release', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2002);
+  world.setActiveSlot(3); // m61_vulcan cannon (0.07s cooldown)
+  const startAmmo = world.slotAmmo[3];
+  const clickRes = world.fireActiveOrdnance(true, []);
+  assert.equal(clickRes.fired, true);
+
+  for (let f = 0; f < 30; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  const afterHoldAmmo = world.slotAmmo[3];
+  assert.ok(startAmmo - afterHoldAmmo >= 5, `Expected sustained cannon bursts, spent ${startAmmo - afterHoldAmmo}`);
+
+  // Release trigger and step another 0.5s -> zero additional rounds spent
+  for (let f = 0; f < 30; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: false });
+  }
+  assert.equal(world.slotAmmo[3], afterHoldAmmo, 'Cannon must stop immediately upon trigger release');
+});
+
+test('M2.0 Test 3: Switching weapon slot mid-hold suppresses unintended fire until trigger is released', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2003);
+  world.setActiveSlot(0); // mam_l
+  const mamStart = world.slotAmmo[0];
+  const cannonStart = world.slotAmmo[3];
+
+  // Press trigger on slot 0, then switch to slot 3 (cannon) while still holding trigger
+  world.fireActiveOrdnance(true, []);
+  assert.equal(world.slotAmmo[0], mamStart - 1);
+  world.setActiveSlot(3);
+
+  for (let f = 0; f < 30; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  assert.equal(world.slotAmmo[3], cannonStart, 'Switching slot while holding fire must suppress accidental discharge');
+
+  // Release and press again on slot 3 -> now cannon fires cleanly
+  world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: false });
+  const freshClick = world.fireActiveOrdnance(true, []);
+  assert.equal(freshClick.fired, true);
+  assert.equal(world.slotAmmo[3], cannonStart - 1);
+});
+
+test('M2.0 Test 4: Firing is blocked when paused / non-playing or disrupted', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2004);
+  const startAmmo = world.slotAmmo[0];
+  const pausedRes = world.fireActiveOrdnance(false, []);
+  assert.equal(pausedRes.fired, false);
+  assert.equal(pausedRes.events.length, 0);
+  assert.equal(world.slotAmmo[0], startAmmo);
+
+  // Also blocked during C2 hijack cyber disruption
+  world.receiveRemoteCyberAttack('c2_hijack', 'BANDIT');
+  const disruptedRes = world.fireActiveOrdnance(true, []);
+  assert.equal(disruptedRes.fired, false);
+  assert.equal(world.slotAmmo[0], startAmmo);
+});
+
+test('M2.0 Test 5: Cooldown and zero-ammo guards prevent firing out-of-spec rounds', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2005);
+  world.setActiveSlot(0);
+  assert.equal(world.fireActiveOrdnance(true, []).fired, true);
+  // Immediate second click inside cooldown must be rejected
+  assert.equal(world.fireActiveOrdnance(true, []).fired, false);
+
+  // Drain remaining ammo and verify empty slot rejects firing
+  world.slotAmmo[0] = 0;
+  world.slotCooldowns[0] = 0;
+  assert.equal(world.fireActiveOrdnance(true, []).fired, false);
+});
+
+test('M2.0 Test 6: Pointer lock error/unlock never disables mouse aim or clears ordnance readiness', () => {
+  const mouse = createMouseInputState();
+  handleMousePointerLockError(mouse);
+  assert.equal(mouse.pointerLocked, false);
+  handleMousePointerEnter(mouse, 400, 300);
+  const move = handleMousePointerMove(mouse, { clientX: 440, clientY: 280 }, 'aim');
+  assert.equal(move.ignored, false);
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2006);
+  // First click in unlocked mode fires immediately
+  const res = world.fireActiveOrdnance(true, []);
+  assert.equal(res.fired, true);
+  assert.equal(world.activeOrdnance.length, 1);
+});
+
+test('M2.0 Test 7: Firing ordnance preserves P0 desiredAimDir stability and emits multiplayer net event', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2007);
+  world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, aimDeltaYawRad: -0.2, aimDeltaPitchRad: 0.08 });
+  const aimBefore = world.getDesiredAimDirection();
+
+  const res = world.fireActiveOrdnance(true, []);
+  assert.equal(res.fired, true);
+  const netEv = res.events.find((e) => e.type === 'ordnance_fired_net');
+  assert.ok(netEv, 'Expected ordnance_fired_net event on fire');
+
+  const aimAfter = world.getDesiredAimDirection();
+  assert.deepEqual(aimAfter, aimBefore, 'Firing must not perturb P0 desiredAimDir');
+});
+
+// =============================================================================
+// M2.1 — UAV GUN SUBCATEGORIES, VERIFIED COMPATIBILITY & FIRE MODES
+// =============================================================================
+
+test('M2.1 Test 1: Four UAV gun subcategories cover all 5 tactical UAV guns + Vulcan', () => {
+  const gunWeapons = Object.values(WEAPONS).filter((w) => w.category === 'cannon');
+  assert.equal(gunWeapons.length, 6);
+  const subKeys = new Set(gunWeapons.map((g) => g.gunSubcategory));
+  assert.equal(subKeys.has('cat_a_light_rifle'), true);
+  assert.equal(subKeys.has('cat_b_heavy_multirotor'), true);
+  assert.equal(subKeys.has('cat_c_rotary_pod'), true);
+  assert.equal(subKeys.has('cat_d_rws_turret'), true);
+  assert.equal(Object.keys(GUN_SUBCATEGORIES).length, 4);
+});
+
+test('M2.1 Test 2: Verified compatibility gates Cat-C heavy rotary pods to heavy UCAVs while Sandbox allows override', () => {
+  const tb2Minigun = checkWeaponCompatibility('bayraktar_tb2', 'dap6_minigun_pod', false);
+  assert.equal(tb2Minigun.compatible, false);
+
+  const babaYagaMinigun = checkWeaponCompatibility('baba_yaga', 'dap6_minigun_pod', false);
+  assert.equal(babaYagaMinigun.compatible, false);
+
+  const mojaveMinigun = checkWeaponCompatibility('mojave_ucav', 'dap6_minigun_pod', false);
+  assert.equal(mojaveMinigun.compatible, true);
+  assert.equal(mojaveMinigun.sandboxOverrideUsed, false);
+
+  const mq9Minigun = checkWeaponCompatibility('mq9x', 'dap6_minigun_pod', false);
+  assert.equal(mq9Minigun.compatible, true);
+
+  const tb2Rws = checkWeaponCompatibility('bayraktar_tb2', 'fire_storm_250', false);
+  assert.equal(tb2Rws.compatible, true);
+
+  const sandboxOverride = checkWeaponCompatibility('bayraktar_tb2', 'dap6_minigun_pod', true);
+  assert.equal(sandboxOverride.compatible, true);
+  assert.equal(sandboxOverride.sandboxOverrideUsed, true);
+});
+
+test('M2.1 Test 3: normalizeLoadoutConfig sanitizes incompatible pods when switching back to Verified mode or lighter airframes', () => {
+  const normalized = normalizeLoadoutConfig(
+    {
+      airframeId: 'bayraktar_tb2',
+      propulsionId: 'turboprop_900',
+      sensorId: 'eoir_das4',
+      slots: ['mam_l', 'dap6_minigun_pod', 'm61_vulcan', 'fire_storm_250'],
+      slotFireModes: ['single', 'auto', 'auto', 'auto'],
+    },
+    false,
+  );
+  assert.equal(checkWeaponCompatibility('bayraktar_tb2', normalized.slots[1], false).compatible, true);
+  assert.equal(checkWeaponCompatibility('bayraktar_tb2', normalized.slots[2], false).compatible, true);
+  assert.equal(normalized.slots[0], 'mam_l');
+  assert.equal(normalized.slots[3], 'fire_storm_250');
+});
+
+test('M2.1 Test 4: Gun fire modes cycle cleanly and enforce Single (1/press), Burst (3/press), and Auto (sustained)', () => {
+  assert.deepEqual(getAllowedFireModes('songar_556'), ['single', 'burst', 'auto']);
+  assert.deepEqual(getAllowedFireModes('dap6_minigun_pod'), ['auto']);
+  assert.deepEqual(getAllowedFireModes('m61_vulcan'), ['burst', 'auto']);
+  assert.equal(cycleFireMode('songar_556', 'single'), 'burst');
+  assert.equal(cycleFireMode('songar_556', 'burst'), 'auto');
+  assert.equal(cycleFireMode('songar_556', 'auto'), 'single');
+
+  const cfg = SimWorld.createDefaultConfig({ disableFuelDepletion: true });
+  cfg.loadout.slots = ['mam_l', 'pg7vl_drop', 'songar_556', 'dap6_minigun_pod'];
+  cfg.loadout.slotFireModes = ['single', 'single', 'single', 'auto'];
+  cfg.loadout.airframeId = 'mojave_ucav';
+  const world = new SimWorld(cfg, 0x2104);
+
+  // Single mode on songar_556: 1 round per press, even if held
+  world.setActiveSlot(2);
+  assert.equal(world.getActiveFireMode(), 'single');
+  const start556 = world.slotAmmo[2];
+  assert.equal(world.fireActiveOrdnance(true, []).fired, true);
+  for (let f = 0; f < 40; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  assert.equal(world.slotAmmo[2], start556 - 1, 'SINGLE gun mode must fire 1 round per press');
+  world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: false });
+
+  // Cycle KeyR -> BURST mode: 3 rounds per press, stops at 3 even if held
+  assert.equal(world.cycleActiveFireMode(), 'burst');
+  const beforeBurst = world.slotAmmo[2];
+  assert.equal(world.fireActiveOrdnance(true, []).fired, true);
+  for (let f = 0; f < 45; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  assert.equal(world.slotAmmo[2], beforeBurst - 3, 'BURST mode must fire 3 rounds per trigger pull');
+  world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: false });
+
+  // Cycle KeyR -> AUTO mode: sustained fire while held + emits matching GunAudioProfile
+  assert.equal(world.cycleActiveFireMode(), 'auto');
+  const beforeAuto = world.slotAmmo[2];
+  const autoClick = world.fireActiveOrdnance(true, []);
+  assert.equal(autoClick.fired, true);
+  const soundEv = autoClick.events.find((e) => e.type === 'sound' && e.kind === 'cannon');
+  assert.equal(soundEv?.type === 'sound' ? soundEv.gunProfile : undefined, 'gun_light_556');
+  for (let f = 0; f < 30; f++) {
+    world.stepFrame(1 / 60, true, { ...NEUTRAL_STEP_INPUT, firingHeld: true });
+  }
+  assert.ok(beforeAuto - world.slotAmmo[2] >= 4, 'AUTO mode must sustain rapid fire while trigger is held');
+});
+
+// =============================================================================
+// M2.2 / M2.3 / M2.4 — AUDIO BANK, GOLDEN HOUR, MOVING CONVOYS & 5-PHASE MISSION
+// =============================================================================
+
+test('M2.2 Test: All 22 STAGE_A_PATHS.audio WAV files exist on disk, manifest has verified CC0 provenance, and every GunAudioProfile maps cleanly', () => {
+  const audioEntries = Object.entries(STAGE_A_PATHS.audio);
+  assert.equal(audioEntries.length, 22, `Expected 22 audio stems, got ${audioEntries.length}`);
+
+  for (const [key, relUrl] of audioEntries) {
+    const absPath = path.resolve(process.cwd(), 'public', relUrl.replace(/^\//, ''));
+    assert.ok(fs.existsSync(absPath), `Missing audio asset on disk for ${key}: ${absPath}`);
+    const stat = fs.statSync(absPath);
+    assert.ok(stat.size > 1000, `Audio asset ${key} unexpectedly small (${stat.size} bytes)`);
+  }
+
+  const verifiedAudioRecords = AUDIO_ASSET_MANIFEST.filter((r) => r.status === 'LICENSE_VERIFIED_FOR_GAME');
+  assert.ok(verifiedAudioRecords.length >= 9, 'Expected CC0 OpenGameArt provenance records in AUDIO_ASSET_MANIFEST');
+
+  const expectedProfiles: GunAudioProfile[] = [
+    'gun_light_556',
+    'gun_medium_762',
+    'gun_enclosed_mg',
+    'gun_rotary_minigun',
+    'gun_rws_250',
+    'cannon_20mm',
+  ];
+  const weaponProfiles = new Set(
+    Object.values(WEAPONS)
+      .filter((w) => w.category === 'cannon')
+      .map((w) => w.audioProfile),
+  );
+  for (const prof of expectedProfiles) {
+    assert.equal(weaponProfiles.has(prof), true, `Missing GunAudioProfile weapon coverage for ${prof}`);
+  }
+});
+
+test('M2.3/M2.4 Test 1: evaluateConvoyKinematics moves deterministically along terrain and matches across 30, 60, and 144 FPS', () => {
+  const sectorConvoy = THEATERS.edwards.landmarks.find((l) => l.type === 'convoy')!;
+  assert.ok(sectorConvoy, 'Expected convoy landmark in Sector 04');
+
+  const k0 = evaluateConvoyKinematics(sectorConvoy, 'edwards', 0);
+  const k15 = evaluateConvoyKinematics(sectorConvoy, 'edwards', 15);
+  assert.ok(Math.hypot(k15.x - k0.x, k15.z - k0.z) > 80, 'Expected convoy to displace significantly over 15s');
+  assert.ok(Math.abs(k15.y - groundHeightAt('edwards', k15.x, k15.z)) < 1e-6, 'Convoy y must match DEM terrain elevation');
+
+  const runForFps = (fps: number) => {
+    const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2304);
+    const dt = 1 / fps;
+    const frames = Math.round(fps * 6.0);
+    for (let f = 0; f < frames; f++) {
+      world.stepFrame(dt, true, NEUTRAL_STEP_INPUT, []);
+    }
+    return world.landmarks.find((l) => l.type === 'convoy')!;
+  };
+
+  const c60 = runForFps(60);
+  const c30 = runForFps(30);
+  const c144 = runForFps(144);
+  assert.ok(Math.abs(c30.x - c60.x) < 1e-6 && Math.abs(c30.z - c60.z) < 1e-6, '30 FPS convoy position drifted');
+  assert.ok(Math.abs(c144.x - c60.x) < 1e-6 && Math.abs(c144.z - c60.z) < 1e-6, '144 FPS convoy position drifted');
+});
+
+test('M2.3/M2.4 Test 2: SimWorld advances 5-phase Combined Experience mission cleanly, marks EO/IR targets once, and opens in Mojave golden hour', () => {
+  const world = new SimWorld(SimWorld.createDefaultConfig({ disableFuelDepletion: true }), 0x2405);
+  const env = world.getEnvironmentSnapshot();
+  assert.ok(
+    env.solar.elevationDeg > 6 && env.solar.elevationDeg <= 22,
+    `Expected Mojave golden-hour elevation band (6..22 deg), got ${env.solar.elevationDeg.toFixed(2)}`,
+  );
+  assert.equal(env.solar.skyColorHex, 0xd99b52);
+  assert.equal(world.mission.phase, 'deployment');
+  assert.equal(world.mission.phaseNumber, 1);
+
+  // Advance simulation ~6s -> enters recon phase (Phase 2)
+  for (let f = 0; f < 360; f++) {
+    world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT, []);
+  }
+  assert.equal(world.mission.phase, 'recon');
+  assert.equal(world.mission.phaseNumber, 2);
+
+  // Mark 2 distinct ground contacts via [T] markReconTarget(), duplicate id ignored
+  const firstId = world.landmarks[0].id;
+  const mark1 = world.markReconTarget(firstId);
+  assert.equal(mark1.marked, true);
+  assert.equal(world.score, 50);
+  assert.ok(mark1.events.some((e) => e.type === 'sound' && e.kind === 'recon_mark'));
+
+  const dup = world.markReconTarget(firstId);
+  assert.equal(dup.marked, false);
+  assert.equal(world.score, 50);
+
+  const secondId = world.landmarks[1].id;
+  const mark2 = world.markReconTarget(secondId);
+  assert.equal(mark2.marked, true);
+  assert.equal(world.score, 100);
+
+  // Step 1 frame -> Phase 2 -> Phase 3 (aerial_encounter)
+  world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT, []);
+  assert.equal(world.mission.phase, 'aerial_encounter');
+  assert.equal(world.mission.phaseNumber, 3);
+
+  // Simulate hostile air kill -> transitions to Phase 4 (ground_activity)
+  world.mission.airKillsCount = 1;
+  world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT, []);
+  assert.equal(world.mission.phase, 'ground_activity');
+  assert.equal(world.mission.phaseNumber, 4);
+
+  // Neutralize remaining landmarks -> transitions to Phase 5 (resolution) & victory
+  for (const lm of world.landmarks) {
+    lm.hp = 0;
+  }
+  const endStep = world.stepFrame(1 / 60, true, NEUTRAL_STEP_INPUT, []);
+  assert.equal(world.mission.phase, 'resolution');
+  assert.equal(world.mission.phaseNumber, 5);
+  assert.ok(endStep.events.some((e) => e.type === 'game_over' && e.victory === true));
+});
+
+
+
 
 
 

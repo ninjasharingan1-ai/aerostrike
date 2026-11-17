@@ -66,18 +66,18 @@ export function computeSolarState(
   let fogColorHex = 0x0e1726;
   let sunColorHex = 0xfff3dc;
 
-  if (elevationDeg > 18) {
+  if (elevationDeg > 22) {
     skyColorHex = 0x6ba6d8;
     fogColorHex = 0x9ec4e2;
     sunColorHex = 0xfff8ea;
-  } else if (elevationDeg > 4) {
-    skyColorHex = 0x4d79a8;
-    fogColorHex = 0x8ea4be;
-    sunColorHex = 0xffcf96;
+  } else if (elevationDeg > 6) {
+    skyColorHex = 0xd99b52;
+    fogColorHex = 0xdba96c;
+    sunColorHex = 0xffcf88;
   } else if (elevationDeg > -4) {
-    skyColorHex = 0x2c3654;
-    fogColorHex = 0x5c4c5c;
-    sunColorHex = 0xff8f52;
+    skyColorHex = 0x7a4a4e;
+    fogColorHex = 0xb3744c;
+    sunColorHex = 0xff9452;
   } else {
     skyColorHex = 0x09101c;
     fogColorHex = 0x0c1524;

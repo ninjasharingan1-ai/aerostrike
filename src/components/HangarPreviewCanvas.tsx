@@ -1,7 +1,8 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { AirframeId, WeaponId } from '../sim/types';
+import { sharedAssetPipeline } from '../engine/assetPipeline';
 import { buildDroneMesh, DroneMeshHandle } from '../engine/droneModels';
 
 interface HangarPreviewCanvasProps {
@@ -19,6 +20,8 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
   const slotsRef = useRef<WeaponId[] | undefined>(slots);
   const requestRenderRef = useRef<(() => void) | null>(null);
   const rebuildModelRef = useRef<((id: AirframeId, wSlots?: WeaponId[]) => void) | null>(null);
+  const setPresetRef = useRef<((preset: 'overview' | 'pylons') => void) | null>(null);
+  const [viewPreset, setViewPreset] = useState<'overview' | 'pylons'>('overview');
 
   const slotsKey = slots ? slots.join(',') : '';
 
@@ -116,7 +119,9 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
     scene.add(handle.group);
 
     rebuildModelRef.current = (nextId: AirframeId, wSlots?: WeaponId[]) => {
+      if (handle.disposeToken) handle.disposeToken.disposed = true;
       scene.remove(handle.group);
+      sharedAssetPipeline.disposeObject3D(handle.group);
       handle = buildDroneMesh(nextId, 0xf59e0b, wSlots);
       scene.add(handle.group);
     };
@@ -127,6 +132,19 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
     let dragging = false;
     let lastX = 0;
     let lastY = 0;
+
+    setPresetRef.current = (preset: 'overview' | 'pylons') => {
+      if (preset === 'pylons') {
+        orbitYaw = 2.48;
+        orbitPitch = -0.04;
+        orbitDist = 6.9;
+      } else {
+        orbitYaw = 0.65;
+        orbitPitch = 0.28;
+        orbitDist = 11.5;
+      }
+      requestRenderRef.current?.();
+    };
 
     let frameId = 0;
     let disposed = false;
@@ -194,7 +212,7 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
       lastX = e.clientX;
       lastY = e.clientY;
       orbitYaw -= dx * 0.01;
-      orbitPitch = Math.max(0.05, Math.min(1.15, orbitPitch + dy * 0.008));
+      orbitPitch = Math.max(-0.24, Math.min(1.15, orbitPitch + dy * 0.008));
       requestRender();
     };
     const onPointerUp = () => {
@@ -202,7 +220,7 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
     };
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
-      orbitDist = Math.max(6.5, Math.min(22, orbitDist + e.deltaY * 0.01));
+      orbitDist = Math.max(5.5, Math.min(22, orbitDist + e.deltaY * 0.01));
       requestRender();
     };
 
@@ -226,6 +244,8 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
       disposed = true;
       cancelAnimationFrame(frameId);
       clearTimeout(frameId);
+      if (handle.disposeToken) handle.disposeToken.disposed = true;
+      sharedAssetPipeline.disposeObject3D(scene);
       dom.removeEventListener('pointerdown', onPointerDown);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('pointerup', onPointerUp);
@@ -238,6 +258,36 @@ export const HangarPreviewCanvas: React.FC<HangarPreviewCanvasProps> = ({ airfra
   return (
     <div className="relative w-full h-44 sm:h-52 rounded-lg overflow-hidden border border-slate-700/80 bg-[#0b121c]">
       <div ref={containerRef} className="w-full h-full cursor-grab active:cursor-grabbing" />
+      <div className="absolute top-2 left-2.5 flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => {
+            setViewPreset('overview');
+            setPresetRef.current?.('overview');
+          }}
+          className={`px-2 py-0.5 rounded text-[10px] font-mono-tabular border cursor-pointer ${
+            viewPreset === 'overview'
+              ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+              : 'bg-black/65 border-slate-700 text-slate-300 hover:text-white'
+          }`}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setViewPreset('pylons');
+            setPresetRef.current?.('pylons');
+          }}
+          className={`px-2 py-0.5 rounded text-[10px] font-mono-tabular border cursor-pointer ${
+            viewPreset === 'pylons'
+              ? 'bg-amber-500/20 border-amber-400 text-amber-200'
+              : 'bg-black/65 border-slate-700 text-slate-300 hover:text-white'
+          }`}
+        >
+          Pylons &amp; Guns
+        </button>
+      </div>
       <div className="absolute bottom-2 right-2.5 text-[10px] font-mono-tabular text-slate-400 pointer-events-none bg-black/55 px-2 py-0.5 rounded">
         Drag to Orbit · Scroll to Zoom
       </div>

@@ -503,39 +503,62 @@ export function buildTheaterTerrain(
   craterInst.instanceMatrix.needsUpdate = true;
   propGroup.add(craterInst);
 
-  // Backlit volumetric desert cloud deck billboards (3 altitude tiers)
+  // Backlit 3-layer volumetric desert cloud deck clusters with warm sunset top/mid/under tinting
   const cloudGroup = new THREE.Group();
   const cloudTex = createCloudTexture();
-  const cloudMat = new THREE.MeshBasicMaterial({
+  const isSector04 = theaterId === 'edwards';
+  const cloudLowerMat = new THREE.MeshBasicMaterial({
     map: cloudTex,
-    color: theaterId === 'edwards' ? 0xfcf5e8 : 0xf8fafc,
+    color: isSector04 ? 0xd9a87e : 0xdbe4ef,
     transparent: true,
-    opacity: theaterId === 'edwards' ? 0.56 : 0.62,
+    opacity: isSector04 ? 0.38 : 0.44,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
-  const cloudPlaneGeo = new THREE.PlaneGeometry(860, 860);
+  const cloudMidMat = new THREE.MeshBasicMaterial({
+    map: cloudTex,
+    color: isSector04 ? 0xfcd9a8 : 0xf1f5f9,
+    transparent: true,
+    opacity: isSector04 ? 0.54 : 0.58,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const cloudTopMat = new THREE.MeshBasicMaterial({
+    map: cloudTex,
+    color: isSector04 ? 0xfde8c8 : 0xffffff,
+    transparent: true,
+    opacity: isSector04 ? 0.46 : 0.5,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const cloudPlaneGeo = new THREE.PlaneGeometry(880, 880);
   cloudPlaneGeo.rotateX(-Math.PI / 2);
 
   const spread = theater.worldRadiusM * 1.55;
   for (let i = 0; i < 42; i++) {
     const angle = i * 2.39996;
     const rad = Math.sqrt((i + 0.5) / 42) * spread;
-    const baseY = 920 + (i % 5) * 165;
-    const scale = 0.8 + (i % 5) * 0.25;
+    const baseY = 910 + (i % 5) * 165;
+    const scale = 0.82 + (i % 5) * 0.24;
     const cx = Math.cos(angle) * rad;
     const cz = Math.sin(angle) * rad;
 
-    const card = new THREE.Mesh(cloudPlaneGeo, cloudMat);
-    card.position.set(cx, baseY, cz);
-    card.scale.setScalar(scale);
-    card.rotation.y = angle;
-    cloudGroup.add(card);
+    const lower = new THREE.Mesh(cloudPlaneGeo, cloudLowerMat);
+    lower.position.set(cx - 42, baseY - 42, cz + 36);
+    lower.scale.setScalar(scale * 0.95);
+    lower.rotation.y = angle + 0.4;
+    cloudGroup.add(lower);
+
+    const mid = new THREE.Mesh(cloudPlaneGeo, cloudMidMat);
+    mid.position.set(cx, baseY, cz);
+    mid.scale.setScalar(scale);
+    mid.rotation.y = angle;
+    cloudGroup.add(mid);
 
     if (i % 2 === 0) {
-      const upper = new THREE.Mesh(cloudPlaneGeo, cloudMat);
-      upper.position.set(cx + 68, baseY + 58, cz - 46);
-      upper.scale.setScalar(scale * 0.72);
+      const upper = new THREE.Mesh(cloudPlaneGeo, cloudTopMat);
+      upper.position.set(cx + 68, baseY + 62, cz - 46);
+      upper.scale.setScalar(scale * 0.74);
       upper.rotation.y = angle + 0.9;
       cloudGroup.add(upper);
     }

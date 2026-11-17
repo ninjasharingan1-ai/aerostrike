@@ -39,6 +39,8 @@ import {
   ActiveOrdnanceState,
   CyberPayloadId,
   DroneFlightState,
+  GunAudioProfile,
+  GunFireMode,
   LoadoutConfig,
   PilotSkillBonuses,
   PredictedImpact,
@@ -50,6 +52,15 @@ import {
   WeaponId,
   WeatherId,
 } from '../types';
+import { cycleFireMode, getAllowedFireModes, resolveSlotFireMode } from '../weaponCompatibility';
+import { evaluateConvoyKinematics } from './groundConvoys';
+import {
+  createInitialMissionState,
+  evaluateMissionTransitions,
+  markMissionTarget,
+  MISSION_PHASE_COPY,
+  MissionDirectorState,
+} from './missionDirector';
 
 export interface SimStepInput {
   pitchOverride: number;
@@ -178,10 +189,13 @@ export type SimEvent =
         | 'cyber_inject'
         | 'cyber_purge'
         | 'cyber_alert'
-        | 'kamikaze_siren';
+        | 'kamikaze_siren'
+        | 'recon_mark';
       intensity?: number;
       isKill?: boolean;
       isBallistic?: boolean;
+      gunProfile?: GunAudioProfile;
+      weaponId?: WeaponId;
       x?: number;
       y?: number;
       z?: number;
@@ -250,8 +264,14 @@ export class SimWorld {
   public readonly activeOrdnance: ActiveOrdnanceState[] = [];
 
   public activeSlot = 0;
-  public slotAmmo: [number, number, number, number] = [4, 4, 2, 80];
+  public slotAmmo: [number, number, number, number] = [4, 4, 2, 110];
   public slotCooldowns: [number, number, number, number] = [0, 0, 0, 0];
+  public slotFireModes: [GunFireMode, GunFireMode, GunFireMode, GunFireMode] = [
+    'single',
+    'single',
+    'single',
+    'auto',
+  ];
   public lockedTargetId: string | null = null;
   public customWaypoint: { x: number; y: number; z: number } | null = null;
 
@@ -300,20 +320,34 @@ export class SimWorld {
   public reserveDrones = 3;
   public aaaBurstCooldown = 1.6;
   public warSmokeCooldown = 0.25;
+  public convoyDustCooldown = 0.32;
+  public mission: MissionDirectorState = createInitialMissionState();
 
   public gameOverTriggered = false;
   public hitstopTimer = 0;
   public trauma = 0;
 
   private nextOrdnanceSeq = 1;
+  private fireSuppressedUntilRelease = false;
+  private burstRemaining = 0;
+  private burstTimerSec = 0;
   private currentAirframeId: LoadoutConfig['airframeId'];
   private currentSlotsKey: string;
+  private lastSyncedInputFireModesKey: string;
   private pendingEvents: SimEvent[] = [];
 
   constructor(config: SimWorldConfig, seed = 0x5a17c0de) {
+    const resolvedFireModes = config.loadout.slots.map((wId, idx) =>
+      resolveSlotFireMode(wId, config.loadout.slotFireModes?.[idx]),
+    ) as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
+
     this.config = {
       ...config,
-      loadout: { ...config.loadout, slots: [...config.loadout.slots] as LoadoutConfig['slots'] },
+      loadout: {
+        ...config.loadout,
+        slots: [...config.loadout.slots] as LoadoutConfig['slots'],
+        slotFireModes: [...resolvedFireModes] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+      },
       sandbox: { ...config.sandbox },
       skillBonuses: { ...config.skillBonuses },
     };
@@ -321,6 +355,8 @@ export class SimWorld {
     this.clock = createFixedClock();
     this.currentAirframeId = config.loadout.airframeId;
     this.currentSlotsKey = config.loadout.slots.join(',');
+    this.slotFireModes = [...resolvedFireModes] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
+    this.lastSyncedInputFireModesKey = (config.loadout.slotFireModes ?? resolvedFireModes).join(',');
     this.drone = createInitialDroneState(config.theaterId, config.loadout.airframeId, config.skillBonuses);
     this.resetSortie(config.theaterId);
     this.pendingEvents = [];
@@ -331,12 +367,13 @@ export class SimWorld {
     return {
       theaterId: 'edwards',
       weatherId: 'clear',
-      utcHours: 19.2,
+      utcHours: 1.3,
       loadout: {
         airframeId: 'bayraktar_tb2',
         propulsionId: 'turboprop_900',
         sensorId: 'eoir_das4',
-        slots: ['mam_l', 'pg7vl_drop', 'r73_archer', 'm61_vulcan'],
+        slots: ['mam_l', 'pg7vl_drop', 'r73_archer', 'fire_storm_250'],
+        slotFireModes: ['single', 'single', 'single', 'auto'],
       },
       sandbox: {
         enabled: false,
@@ -395,7 +432,13 @@ export class SimWorld {
   private rebuildTheaterState(theaterId: TheaterId): void {
     this.config.theaterId = theaterId;
     const spec = THEATERS[theaterId];
-    this.landmarks = spec.landmarks.map((lm) => ({ ...lm, hp: lm.maxHp }));
+    this.landmarks = spec.landmarks.map((lm) => {
+      if (lm.type === 'convoy') {
+        const k = evaluateConvoyKinematics(lm, theaterId, 0);
+        return { ...lm, hp: lm.maxHp, x: k.x, z: k.z, headingRad: k.headingRad };
+      }
+      return { ...lm, hp: lm.maxHp, headingRad: 0 };
+    });
     this.botFlareDecoyUntil.clear();
     this.aiBots = createAiBotSquadron(theaterId);
     this.lockedTargetId = this.landmarks.find((l) => l.hp > 0)?.id ?? null;
@@ -410,6 +453,9 @@ export class SimWorld {
     this.activeOrdnance.length = 0;
 
     this.clock = createFixedClock();
+    this.fireSuppressedUntilRelease = false;
+    this.burstRemaining = 0;
+    this.burstTimerSec = 0;
     this.rebuildTheaterState(targetTheater);
 
     this.drone = createInitialDroneState(
@@ -425,6 +471,9 @@ export class SimWorld {
       WEAPONS[slots[3]].ammoPerSlot,
     ];
     this.slotCooldowns = [0, 0, 0, 0];
+    this.slotFireModes = slots.map((wId, idx) =>
+      resolveSlotFireMode(wId, this.config.loadout.slotFireModes?.[idx] ?? this.slotFireModes[idx]),
+    ) as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
     this.score = 0;
     this.bestCep = null;
     this.trauma = 0;
@@ -454,6 +503,8 @@ export class SimWorld {
     this.reserveDrones = 3;
     this.aaaBurstCooldown = 1.6;
     this.warSmokeCooldown = 0.25;
+    this.convoyDustCooldown = 0.32;
+    this.mission = createInitialMissionState();
     this.nextOrdnanceSeq = 1;
     this.currentAirframeId = this.config.loadout.airframeId;
     this.currentSlotsKey = slots.join(',');
@@ -463,9 +514,25 @@ export class SimWorld {
 
   public syncConfig(next: SimWorldConfig): { events: SimEvent[]; loadoutChanged: boolean } {
     const prevTheater = this.config.theaterId;
+    const nextSlotsKey = next.loadout.slots.join(',');
+    const nextInputFireModesKey = (next.loadout.slotFireModes ?? this.slotFireModes).join(',');
+    const slotsChanged = nextSlotsKey !== this.currentSlotsKey;
+    const inputFireModesChanged = nextInputFireModesKey !== this.lastSyncedInputFireModesKey;
+
+    if (slotsChanged || inputFireModesChanged) {
+      this.slotFireModes = next.loadout.slots.map((wId, idx) =>
+        resolveSlotFireMode(wId, next.loadout.slotFireModes?.[idx]),
+      ) as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
+      this.lastSyncedInputFireModesKey = nextInputFireModesKey;
+    }
+
     this.config = {
       ...next,
-      loadout: { ...next.loadout, slots: [...next.loadout.slots] as LoadoutConfig['slots'] },
+      loadout: {
+        ...next.loadout,
+        slots: [...next.loadout.slots] as LoadoutConfig['slots'],
+        slotFireModes: [...this.slotFireModes] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+      },
       sandbox: { ...next.sandbox },
       skillBonuses: { ...next.skillBonuses },
     };
@@ -475,12 +542,13 @@ export class SimWorld {
     }
 
     let loadoutChanged = false;
-    const nextSlotsKey = next.loadout.slots.join(',');
-    if (next.loadout.airframeId !== this.currentAirframeId || nextSlotsKey !== this.currentSlotsKey) {
+    if (next.loadout.airframeId !== this.currentAirframeId || slotsChanged) {
       loadoutChanged = true;
       const airframeChanged = next.loadout.airframeId !== this.currentAirframeId;
       this.currentAirframeId = next.loadout.airframeId;
       this.currentSlotsKey = nextSlotsKey;
+      this.burstRemaining = 0;
+      this.burstTimerSec = 0;
       if (airframeChanged) {
         const af = AIRFRAMES[this.currentAirframeId];
         this.drone.maxHp = Math.round(af.maxHp * next.skillBonuses.maxHpMult);
@@ -555,7 +623,40 @@ export class SimWorld {
   }
 
   public setActiveSlot(slot: number): void {
-    this.activeSlot = Math.max(0, Math.min(3, Math.floor(slot)));
+    const nextSlot = Math.max(0, Math.min(3, Math.floor(slot)));
+    if (nextSlot !== this.activeSlot) {
+      this.activeSlot = nextSlot;
+      this.fireSuppressedUntilRelease = true;
+      this.burstRemaining = 0;
+      this.burstTimerSec = 0;
+    }
+  }
+
+  public getActiveFireMode(): GunFireMode {
+    const weaponId = this.config.loadout.slots[this.activeSlot];
+    return resolveSlotFireMode(weaponId, this.slotFireModes[this.activeSlot]);
+  }
+
+  public setSlotFireMode(slot: number, mode: GunFireMode): GunFireMode {
+    const idx = Math.max(0, Math.min(3, Math.floor(slot)));
+    const weaponId = this.config.loadout.slots[idx];
+    const allowed = getAllowedFireModes(weaponId);
+    const resolved = allowed.includes(mode) ? mode : resolveSlotFireMode(weaponId);
+    this.slotFireModes[idx] = resolved;
+    if (this.config.loadout.slotFireModes) {
+      this.config.loadout.slotFireModes[idx] = resolved;
+    }
+    if (idx === this.activeSlot) {
+      this.burstRemaining = 0;
+      this.burstTimerSec = 0;
+    }
+    return resolved;
+  }
+
+  public cycleActiveFireMode(): GunFireMode {
+    const weaponId = this.config.loadout.slots[this.activeSlot];
+    const nextMode = cycleFireMode(weaponId, this.getActiveFireMode());
+    return this.setSlotFireMode(this.activeSlot, nextMode);
   }
 
   public adjustThrottleDirect(delta: number): void {
@@ -665,6 +766,48 @@ export class SimWorld {
     this.lockedTargetId = candidates[(idx + 1) % candidates.length];
     this.emit({ type: 'sound', kind: 'lock_chirp' });
     return this.drainEvents();
+  }
+
+  public markReconTarget(explicitTargetId?: string): { marked: boolean; targetName: string | null; events: SimEvent[] } {
+    if (this.gameOverTriggered) return { marked: false, targetName: null, events: [] };
+    let chosen: TheaterLandmark | undefined;
+    if (explicitTargetId !== undefined) {
+      chosen = this.landmarks.find((l) => l.hp > 0 && l.id === explicitTargetId);
+      if (!chosen) return { marked: false, targetName: null, events: [] };
+    } else {
+      const candidateId = this.mission.reconScanTargetId ?? this.lockedTargetId;
+      chosen = this.landmarks.find(
+        (l) => l.hp > 0 && l.id === candidateId && !this.mission.markedTargetIds.includes(l.id),
+      );
+      if (!chosen) {
+        // Pick nearest unmarked living hostile ground landmark within EO/IR optical range (3200m)
+        let bestDist = 3200;
+        for (const l of this.landmarks) {
+          if (l.hp <= 0 || this.mission.markedTargetIds.includes(l.id)) continue;
+          const d = Math.hypot(l.x - this.drone.x, l.z - this.drone.z);
+          if (d < bestDist) {
+            bestDist = d;
+            chosen = l;
+          }
+        }
+      }
+      if (!chosen) return { marked: false, targetName: null, events: [] };
+    }
+
+    const res = markMissionTarget(this.mission, chosen.id);
+    if (!res.newlyMarked) return { marked: false, targetName: chosen.name, events: [] };
+
+    this.lockedTargetId = chosen.id;
+    this.score += 50;
+    this.combatHitCallout = `RECON MARKED · ${chosen.name.toUpperCase()} +50`;
+    this.combatHitUntil = this.clock.simTimeSec + 1.8;
+    this.emit({ type: 'sound', kind: 'recon_mark' });
+    this.emitAar(
+      'cyber',
+      `EO/IR Contact Marked: ${chosen.name}`,
+      `Verified coordinates designated (${res.totalMarked}/${this.mission.requiredReconMarks} recon marks, +50 pts)`,
+    );
+    return { marked: true, targetName: chosen.name, events: this.drainEvents() };
   }
 
   private spawnOrdnanceEntity(payload: {
@@ -795,28 +938,19 @@ export class SimWorld {
     return { armed: this.kamikazeArmed, events: this.drainEvents() };
   }
 
-  public fireActiveOrdnance(
-    isPlaying: boolean,
+  private dispatchOrdnanceRound(
+    weaponId: WeaponId,
     remotePilots: RemotePilotState[],
-  ): { fired: boolean; events: SimEvent[] } {
-    if (!isPlaying || this.gameOverTriggered) return { fired: false, events: [] };
-    if (
-      this.clock.simTimeSec < this.playerDisruptedUntil &&
-      (this.playerDisruptedKind === 'c2_hijack' || this.playerDisruptedKind === 'firmware_brick')
-    ) {
-      return { fired: false, events: [] };
-    }
-    const weaponId = this.config.loadout.slots[this.activeSlot];
+    cooldownOverrideSec?: number,
+  ): void {
     const spec = WEAPONS[weaponId];
-    if (this.slotCooldowns[this.activeSlot] > 0) return { fired: false, events: [] };
-    if (!this.config.sandbox.infiniteAmmo && this.slotAmmo[this.activeSlot] <= 0) {
-      return { fired: false, events: [] };
-    }
-
     if (!this.config.sandbox.infiniteAmmo) {
       this.slotAmmo[this.activeSlot] -= 1;
     }
-    this.slotCooldowns[this.activeSlot] = spec.cooldownSec * this.config.skillBonuses.weaponCooldownMult;
+    this.slotCooldowns[this.activeSlot] =
+      cooldownOverrideSec !== undefined
+        ? cooldownOverrideSec
+        : spec.cooldownSec * this.config.skillBonuses.weaponCooldownMult;
 
     const cosP = Math.cos(this.drone.pitch);
     const fwdX = -Math.sin(this.drone.yaw) * cosP;
@@ -868,6 +1002,8 @@ export class SimWorld {
       this.emit({
         type: 'sound',
         kind: 'cannon',
+        gunProfile: spec.audioProfile,
+        weaponId,
         x: this.drone.x + fwdX * 3.8,
         y: this.drone.y - 0.3,
         z: this.drone.z + fwdZ * 3.8,
@@ -927,6 +1063,44 @@ export class SimWorld {
         life: 0.45,
       });
       this.trauma = Math.min(1, this.trauma + (spec.category === 'ballistic_missile' ? 0.35 : 0.2));
+    }
+  }
+
+  public fireActiveOrdnance(
+    isPlaying: boolean,
+    remotePilots: RemotePilotState[],
+    isHoldTick = false,
+  ): { fired: boolean; events: SimEvent[] } {
+    if (!isHoldTick) {
+      this.fireSuppressedUntilRelease = false;
+    }
+    if (!isPlaying || this.gameOverTriggered) return { fired: false, events: [] };
+    if (
+      this.clock.simTimeSec < this.playerDisruptedUntil &&
+      (this.playerDisruptedKind === 'c2_hijack' || this.playerDisruptedKind === 'firmware_brick')
+    ) {
+      return { fired: false, events: [] };
+    }
+    const weaponId = this.config.loadout.slots[this.activeSlot];
+    const spec = WEAPONS[weaponId];
+    if (this.slotCooldowns[this.activeSlot] > 0) return { fired: false, events: [] };
+    if (!this.config.sandbox.infiniteAmmo && this.slotAmmo[this.activeSlot] <= 0) {
+      return { fired: false, events: [] };
+    }
+
+    const activeMode = this.getActiveFireMode();
+    if (spec.category === 'cannon' && activeMode === 'burst' && !isHoldTick) {
+      const burstTotal = Math.max(2, spec.burstCount ?? 3);
+      const interval = spec.burstIntervalSec ?? 0.085;
+      this.fireSuppressedUntilRelease = true;
+      this.burstRemaining = burstTotal - 1;
+      this.burstTimerSec = interval;
+      this.dispatchOrdnanceRound(weaponId, remotePilots, interval * 0.9);
+    } else {
+      if (spec.category !== 'cannon' || activeMode === 'single') {
+        this.fireSuppressedUntilRelease = true;
+      }
+      this.dispatchOrdnanceRound(weaponId, remotePilots);
     }
 
     return { fired: true, events: this.drainEvents() };
@@ -1300,9 +1474,41 @@ export class SimWorld {
     const theater = THEATERS[theaterId];
     const normalizedSandbox: SandboxConfig = { ...this.config.sandbox, timeScale: 1.0 };
 
-    // Continuous cannon hold support
-    if (input.firingHeld && WEAPONS[this.config.loadout.slots[this.activeSlot]].category === 'cannon') {
-      this.fireActiveOrdnance(true, remotePilots);
+    // Process active queued gun bursts first
+    if (this.burstRemaining > 0 && !this.gameOverTriggered) {
+      const c2Locked =
+        this.clock.simTimeSec < this.playerDisruptedUntil &&
+        (this.playerDisruptedKind === 'c2_hijack' || this.playerDisruptedKind === 'firmware_brick');
+      const burstWId = this.config.loadout.slots[this.activeSlot];
+      const burstSpec = WEAPONS[burstWId];
+      const hasAmmo = this.config.sandbox.infiniteAmmo || this.slotAmmo[this.activeSlot] > 0;
+      if (c2Locked || burstSpec.category !== 'cannon' || !hasAmmo) {
+        this.burstRemaining = 0;
+      } else {
+        this.burstTimerSec -= dt;
+        if (this.burstTimerSec <= 0) {
+          this.burstRemaining -= 1;
+          const interval = burstSpec.burstIntervalSec ?? 0.085;
+          const postCd =
+            this.burstRemaining > 0
+              ? interval * 0.9
+              : Math.max(0.24, burstSpec.cooldownSec * 2.2) * this.config.skillBonuses.weaponCooldownMult;
+          this.dispatchOrdnanceRound(burstWId, remotePilots, postCd);
+          if (this.burstRemaining > 0) {
+            this.burstTimerSec += interval;
+          }
+        }
+      }
+    }
+
+    // Continuous held fire applies only to automatic gun systems and clears suppression on release
+    if (!input.firingHeld) {
+      this.fireSuppressedUntilRelease = false;
+    } else if (!this.fireSuppressedUntilRelease) {
+      const activeWId = this.config.loadout.slots[this.activeSlot];
+      if (WEAPONS[activeWId].category === 'cannon' && this.getActiveFireMode() === 'auto') {
+        this.fireActiveOrdnance(true, remotePilots, true);
+      }
     }
 
     // Cooldowns & Cyber Intrusion Timers
@@ -1745,6 +1951,37 @@ export class SimWorld {
       }
     }
 
+    // Advance Moving Armored Ground Convoys & Emit Backlit Sandy Dust Plumes
+    this.convoyDustCooldown -= dt;
+    const emitConvoyDust = this.convoyDustCooldown <= 0;
+    if (emitConvoyDust) {
+      this.convoyDustCooldown = 0.28;
+    }
+    for (const lm of this.landmarks) {
+      if (lm.type !== 'convoy' || lm.hp <= 0) continue;
+      const k = evaluateConvoyKinematics(lm, theaterId, sortieTimeSec);
+      lm.x = k.x;
+      lm.z = k.z;
+      lm.headingRad = k.headingRad;
+      if (emitConvoyDust) {
+        const backX = Math.sin(k.headingRad);
+        const backZ = Math.cos(k.headingRad);
+        this.emit({
+          type: 'particle_burst',
+          x: k.x + backX * 14,
+          y: k.y + 3.2,
+          z: k.z + backZ * 14,
+          count: 2,
+          speed: 7.5,
+          size: 4.8,
+          r: 0.88,
+          g: 0.72,
+          b: 0.46,
+          life: 1.55,
+        });
+      }
+    }
+
     // SAM sites & Airbases defensive flak & interceptors
     this.aaaBurstCooldown -= dt;
     this.warSmokeCooldown -= dt;
@@ -1970,8 +2207,9 @@ export class SimWorld {
                 this.trauma = Math.min(1, this.trauma + 0.45);
                 this.hitstopTimer = 0.045;
                 this.emit({ type: 'sound', kind: 'hit_marker', isKill: true });
-                this.combatHitCallout = 'AIRCRAFT DESTROYED +250';
+                this.combatHitCallout = 'DESTROYED · +250';
                 this.combatHitUntil = sortieTimeSec + 2.1;
+                this.mission.airKillsCount += 1;
                 this.emit({
                   type: 'air_kill',
                   info: { victimName: ai.callsign, points: 250, weaponId: updated.weaponId },
@@ -2057,8 +2295,9 @@ export class SimWorld {
                 if (updated.ownerId === 'player') {
                   this.bestCep = this.bestCep === null ? cep : Math.min(this.bestCep, cep);
                   this.score += lm.points;
+                  this.mission.groundKillsCount += 1;
                   this.emit({ type: 'sound', kind: 'hit_marker', isKill: true });
-                  this.combatHitCallout = `TARGET DESTROYED +${lm.points}`;
+                  this.combatHitCallout = `DESTROYED · +${lm.points}`;
                   this.combatHitUntil = sortieTimeSec + 2.1;
                   this.emit({
                     type: 'target_destroyed',
@@ -2155,14 +2394,90 @@ export class SimWorld {
       this.emitAar('damage', 'Airframe Shot Down', `Redeploying reserve drone (${this.reserveDrones}/3 remaining)`);
     }
 
+    // EO/IR Reconnaissance Target Optical Dwell Scan (active in EO/IR sensor mode)
+    if (!this.gameOverTriggered && input.cameraEoirMode) {
+      const noseDir = aimAnglesToDirection(this.drone.yaw, this.drone.pitch);
+      let scanCandidate: TheaterLandmark | null = null;
+      let bestScore = 0.52;
+      for (const lm of this.landmarks) {
+        if (lm.hp <= 0 || this.mission.markedTargetIds.includes(lm.id)) continue;
+        const ly = Math.max(theater.waterLevelM, groundHeightAt(theaterId, lm.x, lm.z)) + 8;
+        const dx = lm.x - this.drone.x;
+        const dy = ly - this.drone.y;
+        const dz = lm.z - this.drone.z;
+        const dist = Math.hypot(dx, dy, dz);
+        if (dist > 2800 || dist < 10) continue;
+        const dot = (dx * noseDir.x + dy * noseDir.y + dz * noseDir.z) / dist;
+        if (dot > bestScore || (lm.id === this.lockedTargetId && dist < 2600)) {
+          bestScore = dot;
+          scanCandidate = lm;
+        }
+      }
+      if (scanCandidate) {
+        if (this.mission.reconScanTargetId !== scanCandidate.id) {
+          this.mission.reconScanTargetId = scanCandidate.id;
+          this.mission.reconScanProgress = 0;
+        }
+        this.mission.reconScanProgress = Math.min(1, this.mission.reconScanProgress + dt * 0.95);
+        if (this.mission.reconScanProgress >= 1) {
+          const markedRes = markMissionTarget(this.mission, scanCandidate.id);
+          if (markedRes.newlyMarked) {
+            this.lockedTargetId = scanCandidate.id;
+            this.score += 50;
+            this.combatHitCallout = `RECON MARKED · ${scanCandidate.name.toUpperCase()} +50`;
+            this.combatHitUntil = sortieTimeSec + 1.8;
+            this.emit({ type: 'sound', kind: 'recon_mark' });
+            this.emitAar(
+              'cyber',
+              `EO/IR Contact Marked: ${scanCandidate.name}`,
+              `Optical telemetry confirmed (${markedRes.totalMarked}/${this.mission.requiredReconMarks} marks, +50 pts)`,
+            );
+          }
+        }
+      } else {
+        this.mission.reconScanTargetId = null;
+        this.mission.reconScanProgress = Math.max(0, this.mission.reconScanProgress - dt * 1.4);
+      }
+    } else {
+      this.mission.reconScanTargetId = null;
+      this.mission.reconScanProgress = 0;
+    }
+
     // Victory / Defeat Check
     const aliveLandmarks = this.landmarks.filter((l) => l.hp > 0).length;
+    const convoyAlive = this.landmarks.some((l) => l.type === 'convoy' && l.hp > 0);
+    const transitionedPhase = evaluateMissionTransitions(this.mission, {
+      simTimeSec: sortieTimeSec,
+      droneZ: this.drone.z,
+      cameraEoirMode: Boolean(input.cameraEoirMode),
+      aliveLandmarksCount: aliveLandmarks,
+      convoyAlive,
+      gameOverVictory: aliveLandmarks === 0 || this.redTickets <= 0,
+    });
+    if (transitionedPhase && transitionedPhase !== 'resolution') {
+      const pCopy = MISSION_PHASE_COPY[transitionedPhase];
+      this.combatHitCallout = `PHASE ${pCopy.phaseNumber} · ${pCopy.title.toUpperCase()}`;
+      this.combatHitUntil = sortieTimeSec + 2.2;
+      this.emit({ type: 'sound', kind: 'lock_chirp' });
+      this.emitAar('launch', `Mission Phase ${pCopy.phaseNumber}: ${pCopy.title}`, pCopy.objective);
+    }
+
     if (
       !this.gameOverTriggered &&
       (this.drone.hp <= 0 || aliveLandmarks === 0 || this.redTickets <= 0 || this.blueTickets <= 0)
     ) {
       this.gameOverTriggered = true;
       const victory = aliveLandmarks === 0 || this.redTickets <= 0;
+      if (victory) {
+        evaluateMissionTransitions(this.mission, {
+          simTimeSec: sortieTimeSec,
+          droneZ: this.drone.z,
+          cameraEoirMode: Boolean(input.cameraEoirMode),
+          aliveLandmarksCount: 0,
+          convoyAlive: false,
+          gameOverVictory: true,
+        });
+      }
       this.emitAar(
         'end',
         victory ? 'Objectives Neutralized' : 'Squadron Depleted',

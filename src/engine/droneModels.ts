@@ -6,7 +6,9 @@ import { sharedAssetPipeline } from './assetPipeline';
 
 export interface DroneMeshHandle {
   group: THREE.Group;
+  ordnanceGroup?: THREE.Group;
   propellers: THREE.Object3D[];
+  rotaryClusters?: THREE.Object3D[];
   exhaustGlows: THREE.Mesh[];
   aileronsPort?: THREE.Object3D[];
   aileronsStbd?: THREE.Object3D[];
@@ -80,6 +82,8 @@ function getAirframeBaseColor(airframeId: AirframeId): number {
       return 0x505964; // Russian RuAF dark steel grey
     case 'zala_lancet':
       return 0x626b75; // Tactical grey composite
+    case 'mojave_ucav':
+      return 0x67727e; // US Army / GA-ASI rugged tactical grey
     case 'xq58a':
       return 0x363d47; // RAM stealth charcoal
     case 'switchblade_x':
@@ -95,12 +99,21 @@ function attachHardpointOrdnance(
   equippedSlots: WeaponId[] | undefined,
   darkMetalMat: THREE.Material,
   accentMat: THREE.Material,
+  rotaryClusters: THREE.Object3D[] = [],
 ) {
   const oliveOrdMat = new THREE.MeshStandardMaterial({ color: 0x4b5d3f, roughness: 0.45, metalness: 0.4 });
   const lightOrdMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, roughness: 0.35, metalness: 0.65 });
+  const gunSteelMat = new THREE.MeshStandardMaterial({ color: 0x1e2530, roughness: 0.28, metalness: 0.88 });
+  const opticLensMat = new THREE.MeshStandardMaterial({
+    color: 0x38bdf8,
+    roughness: 0.12,
+    metalness: 0.2,
+    emissive: 0x075985,
+    emissiveIntensity: 0.65,
+  });
   const copperMat = new THREE.MeshStandardMaterial({ color: 0xd97706, roughness: 0.32, metalness: 0.78 });
 
-  const slots: WeaponId[] = equippedSlots ?? ['mam_l', 'pg7vl_drop', 'r73_archer', 'm61_vulcan'];
+  const slots: WeaponId[] = equippedSlots ?? ['mam_l', 'pg7vl_drop', 'r73_archer', 'fire_storm_250'];
 
   for (let i = 0; i < pylonOffsets.length; i++) {
     const [px, py, pz] = pylonOffsets[i];
@@ -126,14 +139,122 @@ function attachHardpointOrdnance(
         group.add(nose);
       }
     } else if (spec.category === 'cannon') {
-      // Twin-barrel rotary autocannon gun pod
-      const pod = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.16, 1.05), darkMetalMat);
-      pod.position.set(px, storeY, pz);
-      group.add(pod);
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.65, 8), lightOrdMat);
-      barrel.rotation.x = Math.PI / 2;
-      barrel.position.set(px, storeY, pz - 0.7);
-      group.add(barrel);
+      if (wId === 'songar_556' || wId === 'songar_762') {
+        // Cat A / Cat B Gimbaled Rifle / Belt-Fed LMG Pod
+        const isHeavy762 = wId === 'songar_762';
+        const yoke = new THREE.Mesh(
+          new THREE.BoxGeometry(isHeavy762 ? 0.22 : 0.17, 0.14, 0.22),
+          darkMetalMat,
+        );
+        yoke.position.set(px, storeY + 0.05, pz);
+        group.add(yoke);
+
+        const receiver = new THREE.Mesh(
+          new THREE.BoxGeometry(isHeavy762 ? 0.12 : 0.09, 0.12, isHeavy762 ? 0.62 : 0.5),
+          gunSteelMat,
+        );
+        receiver.position.set(px, storeY - 0.04, pz - 0.06);
+        group.add(receiver);
+
+        if (isHeavy762) {
+          // Box magazine for 7.62x54R belt-fed MG
+          const ammoBox = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.24), oliveOrdMat);
+          ammoBox.position.set(px, storeY - 0.15, pz + 0.02);
+          group.add(ammoBox);
+        } else {
+          // Curved 5.56 magazine
+          const mag = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.16, 0.08), darkMetalMat);
+          mag.position.set(px, storeY - 0.14, pz - 0.12);
+          mag.rotation.x = 0.22;
+          group.add(mag);
+        }
+
+        const barrel = new THREE.Mesh(
+          new THREE.CylinderGeometry(isHeavy762 ? 0.024 : 0.018, isHeavy762 ? 0.028 : 0.022, isHeavy762 ? 0.68 : 0.52, 8),
+          lightOrdMat,
+        );
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(px, storeY - 0.02, pz - (isHeavy762 ? 0.62 : 0.48));
+        group.add(barrel);
+
+        const sight = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), opticLensMat);
+        sight.position.set(px + 0.06, storeY + 0.01, pz - 0.18);
+        group.add(sight);
+      } else if (wId === 'tikad_mg') {
+        // Cat B Enclosed Shroud LMG Pod
+        const shroud = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.2, 0.86), gunSteelMat);
+        shroud.position.set(px, storeY - 0.02, pz);
+        group.add(shroud);
+
+        const trim = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.05, 0.72), oliveOrdMat);
+        trim.position.set(px, storeY + 0.03, pz);
+        group.add(trim);
+
+        const opticWindow = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.06, 0.06), opticLensMat);
+        opticWindow.position.set(px + 0.06, storeY + 0.01, pz - 0.43);
+        group.add(opticWindow);
+
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.03, 0.56, 8), lightOrdMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(px, storeY - 0.03, pz - 0.64);
+        group.add(barrel);
+      } else if (wId === 'dap6_minigun_pod' || wId === 'm61_vulcan') {
+        // Cat C Heavy 6-Barrel Rotary Gatling Gun Pod with Animated Barrel Cluster
+        const isVulcan = wId === 'm61_vulcan';
+        const podRad = isVulcan ? 0.145 : 0.125;
+        const podLen = isVulcan ? 1.32 : 1.12;
+        const housing = new THREE.Mesh(new THREE.CylinderGeometry(podRad, podRad * 0.9, podLen, 12), gunSteelMat);
+        housing.rotation.x = Math.PI / 2;
+        housing.position.set(px, storeY - 0.03, pz + 0.08);
+        group.add(housing);
+
+        const tailCone = new THREE.Mesh(new THREE.ConeGeometry(podRad * 0.88, 0.34, 10), darkMetalMat);
+        tailCone.rotation.x = Math.PI / 2;
+        tailCone.position.set(px, storeY - 0.03, pz + 0.08 + podLen * 0.5 + 0.16);
+        group.add(tailCone);
+
+        const collar = new THREE.Mesh(new THREE.CylinderGeometry(podRad * 0.82, podRad * 0.82, 0.12, 12), copperMat);
+        collar.rotation.x = Math.PI / 2;
+        collar.position.set(px, storeY - 0.03, pz + 0.08 - podLen * 0.5);
+        group.add(collar);
+
+        const cluster = new THREE.Group();
+        cluster.position.set(px, storeY - 0.03, pz + 0.08 - podLen * 0.5 - 0.36);
+        const barrelLen = isVulcan ? 0.82 : 0.68;
+        const ringRad = isVulcan ? 0.048 : 0.04;
+        for (let b = 0; b < 6; b++) {
+          const ang = (b * Math.PI * 2) / 6;
+          const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.014, barrelLen, 6), lightOrdMat);
+          bar.rotation.x = Math.PI / 2;
+          bar.position.set(Math.cos(ang) * ringRad, Math.sin(ang) * ringRad, 0);
+          cluster.add(bar);
+        }
+        const clamp = new THREE.Mesh(new THREE.CylinderGeometry(ringRad * 1.28, ringRad * 1.28, 0.06, 10), darkMetalMat);
+        clamp.rotation.x = Math.PI / 2;
+        clamp.position.z = -barrelLen * 0.32;
+        cluster.add(clamp);
+        group.add(cluster);
+        rotaryClusters.push(cluster);
+      } else {
+        // Cat D Tactical Underwing RWS Turret (Fire Storm 250 / Gimbaled Autocannon)
+        const mount = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.12, 0.14, 12), darkMetalMat);
+        mount.position.set(px, storeY + 0.02, pz);
+        group.add(mount);
+
+        const turret = new THREE.Mesh(new THREE.SphereGeometry(0.145, 12, 10), lightOrdMat);
+        turret.scale.set(1.0, 0.82, 1.35);
+        turret.position.set(px, storeY - 0.06, pz - 0.04);
+        group.add(turret);
+
+        const sensorEye = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), opticLensMat);
+        sensorEye.position.set(px + 0.075, storeY - 0.05, pz - 0.18);
+        group.add(sensorEye);
+
+        const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 0.72, 8), gunSteelMat);
+        barrel.rotation.x = Math.PI / 2;
+        barrel.position.set(px - 0.03, storeY - 0.06, pz - 0.52);
+        group.add(barrel);
+      }
     } else if (spec.category === 'glide_bomb') {
       const bomb = new THREE.Mesh(new THREE.CylinderGeometry(0.085, 0.075, 1.1, 10), lightOrdMat);
       bomb.rotation.x = Math.PI / 2;
@@ -178,14 +299,19 @@ export function buildDroneMesh(
 ): DroneMeshHandle {
   const outerGroup = new THREE.Group();
   const group = new THREE.Group();
+  const ordnanceGroup = new THREE.Group();
   outerGroup.add(group);
+  outerGroup.add(ordnanceGroup);
 
   const propellers: THREE.Object3D[] = [];
+  const rotaryClusters: THREE.Object3D[] = [];
   const exhaustGlows: THREE.Mesh[] = [];
   const disposeToken = { disposed: false };
   const handle: DroneMeshHandle = {
     group: outerGroup,
+    ordnanceGroup,
     propellers,
+    rotaryClusters,
     exhaustGlows,
     aileronsPort: [],
     aileronsStbd: [],
@@ -298,7 +424,7 @@ export function buildDroneMesh(
     group.add(opticBall);
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-2.6, -0.02, 0.08],
         [-1.65, -0.02, 0.08],
@@ -308,8 +434,73 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
     buildProp(0, 0.06, 1.98, 1.25, 2);
+  } else if (airframeId === 'mojave_ucav') {
+    // MQ-1C Mojave STOL Heavy Gunship UCAV
+    const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.25, 5.9, 16), hullMat);
+    fuse.rotation.x = Math.PI / 2;
+    group.add(fuse);
+
+    const noseDome = new THREE.Mesh(new THREE.SphereGeometry(0.45, 16, 12), hullMat);
+    noseDome.scale.set(0.92, 0.86, 1.9);
+    noseDome.position.set(0, 0.16, -2.05);
+    group.add(noseDome);
+
+    const wing = new THREE.Mesh(new THREE.BoxGeometry(10.8, 0.11, 1.02), hullMat);
+    wing.position.set(0, 0.08, 0.12);
+    group.add(wing);
+
+    for (const side of [-1, 1]) {
+      const tiplet = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.34, 0.72), accentMat);
+      tiplet.position.set(side * 5.45, 0.22, 0.2);
+      tiplet.rotation.z = -side * 0.45;
+      group.add(tiplet);
+
+      // Characteristic MQ-1C inverted V-tail
+      const vTail = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.075, 0.56), hullMat);
+      vTail.position.set(side * 0.62, -0.18, 2.55);
+      vTail.rotation.z = side * 0.62;
+      group.add(vTail);
+
+      // Rugged fixed main STOL gear struts + chunky tundra wheels
+      const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.85, 8), darkMetalMat);
+      strut.position.set(side * 0.78, -0.44, 0.25);
+      strut.rotation.z = side * 0.32;
+      group.add(strut);
+      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.13, 12), darkMetalMat);
+      wheel.rotation.z = Math.PI / 2;
+      wheel.position.set(side * 0.92, -0.82, 0.25);
+      group.add(wheel);
+    }
+
+    const noseStrut = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.78, 8), darkMetalMat);
+    noseStrut.position.set(0, -0.44, -2.15);
+    group.add(noseStrut);
+    const noseWheel = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.1, 10), darkMetalMat);
+    noseWheel.rotation.z = Math.PI / 2;
+    noseWheel.position.set(0, -0.8, -2.15);
+    group.add(noseWheel);
+
+    const opticBall = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 10), opticGlassMat);
+    opticBall.position.set(0, -0.4, -1.65);
+    group.add(opticBall);
+
+    attachHardpointOrdnance(
+      ordnanceGroup,
+      [
+        [-2.7, -0.06, 0.12],
+        [-1.55, -0.06, 0.12],
+        [1.55, -0.06, 0.12],
+        [2.7, -0.06, 0.12],
+      ],
+      equippedSlots,
+      darkMetalMat,
+      accentMat,
+      rotaryClusters,
+    );
+    buildProp(0, 0.02, 3.05, 1.4, 4);
   } else if (airframeId === 'baba_yaga') {
     // Ukrainian Heavy Hexacopter Night Bomber ("Baba Yaga")
     const centerDeck = new THREE.Mesh(new THREE.CylinderGeometry(0.88, 0.95, 0.34, 6), hullMat);
@@ -374,7 +565,7 @@ export function buildDroneMesh(
       group.add(skid);
     }
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-0.45, -0.24, -0.15],
         [-0.18, -0.24, 0.2],
@@ -384,6 +575,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
   } else if (airframeId === 'shahed_136' || airframeId === 'iai_harop') {
     const isHarop = airframeId === 'iai_harop';
@@ -435,7 +627,7 @@ export function buildDroneMesh(
     }
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-1.15, -0.08, 0.75],
         [-0.55, -0.08, 0.45],
@@ -445,6 +637,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
     buildProp(0, 0.08, 2.02, 1.15, 2);
   } else if (airframeId === 'zala_lancet') {
@@ -475,7 +668,7 @@ export function buildDroneMesh(
     group.add(band);
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-0.45, -0.18, -0.25],
         [-0.22, -0.18, 0.15],
@@ -485,6 +678,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
     buildProp(0, 0, 1.68, 0.92, 2);
   } else if (airframeId === 'punisher_ua') {
@@ -507,7 +701,7 @@ export function buildDroneMesh(
     optic.position.set(0, -0.22, -1.1);
     group.add(optic);
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-1.35, 0.02, -0.05],
         [-0.65, 0.02, -0.05],
@@ -517,6 +711,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
     buildProp(0, 0.02, 1.85, 0.95, 2);
   } else if (airframeId === 'mq9x' || airframeId === 'hermes_900' || airframeId === 'orion_ru') {
@@ -558,7 +753,7 @@ export function buildDroneMesh(
     group.add(opticBall);
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-2.4, -0.1, 0.15],
         [-1.35, -0.1, 0.15],
@@ -568,6 +763,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
     buildProp(0, 0, 3.15, 1.35, 3);
   } else if (airframeId === 'xq58a') {
@@ -628,7 +824,7 @@ export function buildDroneMesh(
     group.add(sensorWindow);
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-2.1, -0.08, 0.65],
         [-1.1, -0.14, 0.35],
@@ -638,6 +834,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
 
     const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.28, 0.5, 12), darkMetalMat);
@@ -679,7 +876,7 @@ export function buildDroneMesh(
     }
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-3.4, 0.18, 0.3],
         [-1.3, -0.1, 0.2],
@@ -689,6 +886,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
 
     const vStab = new THREE.Mesh(new THREE.BoxGeometry(0.08, 1.25, 0.85), hullMat);
@@ -727,7 +925,7 @@ export function buildDroneMesh(
     group.add(canard);
 
     attachHardpointOrdnance(
-      group,
+      ordnanceGroup,
       [
         [-1.4, -0.1, 0.9],
         [-0.75, -0.12, 0.45],
@@ -737,6 +935,7 @@ export function buildDroneMesh(
       equippedSlots,
       darkMetalMat,
       accentMat,
+      rotaryClusters,
     );
 
     const ramjetPod = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.22, 1.9, 12), darkMetalMat);
@@ -750,7 +949,7 @@ export function buildDroneMesh(
     exhaustGlows.push(glow);
   }
 
-  group.traverse((child) => {
+  outerGroup.traverse((child) => {
     if ((child as THREE.Mesh).isMesh) {
       child.castShadow = true;
       child.receiveShadow = true;
@@ -814,7 +1013,7 @@ export function buildDroneMesh(
 /**
  * Builds composite 3D ordnance meshes (ballistic missiles, glide bombs, drop bombs, cruise missiles, cannon tracers)
  */
-export function buildOrdnanceMesh(category: WeaponCategory): THREE.Group {
+export function buildOrdnanceMesh(category: WeaponCategory, weaponId?: WeaponId): THREE.Group {
   const g = new THREE.Group();
   const bodyMat = new THREE.MeshStandardMaterial({
     color:
@@ -836,15 +1035,52 @@ export function buildOrdnanceMesh(category: WeaponCategory): THREE.Group {
   const flameMat = new THREE.MeshBasicMaterial({ color: 0xfb923c });
 
   if (category === 'cannon') {
+    let outerHex = 0xf97316;
+    let coreHex = 0xfffbeb;
+    let outerRTop = 0.16;
+    let outerRBot = 0.12;
+    let coreRad = 0.075;
+    let tracerLen = 10.2;
+
+    if (weaponId === 'songar_556') {
+      outerHex = 0xfbbf24;
+      coreHex = 0xfffbeb;
+      outerRTop = 0.11;
+      outerRBot = 0.085;
+      coreRad = 0.05;
+      tracerLen = 8.8;
+    } else if (weaponId === 'dap6_minigun_pod') {
+      outerHex = 0xf59e0b;
+      coreHex = 0xfef9c3;
+      outerRTop = 0.15;
+      outerRBot = 0.11;
+      coreRad = 0.075;
+      tracerLen = 11.6;
+    } else if (weaponId === 'fire_storm_250') {
+      outerHex = 0xf97316;
+      coreHex = 0xfee2e2;
+      outerRTop = 0.14;
+      outerRBot = 0.1;
+      coreRad = 0.068;
+      tracerLen = 10.6;
+    } else if (weaponId === 'm61_vulcan') {
+      outerHex = 0xea580c;
+      coreHex = 0xfff7ed;
+      outerRTop = 0.23;
+      outerRBot = 0.18;
+      coreRad = 0.11;
+      tracerLen = 13.0;
+    }
+
     const tracer = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.18, 0.14, 10.5, 6),
-      new THREE.MeshBasicMaterial({ color: 0xf97316, transparent: true, opacity: 0.85 }),
+      new THREE.CylinderGeometry(outerRTop, outerRBot, tracerLen, 6),
+      new THREE.MeshBasicMaterial({ color: outerHex, transparent: true, opacity: 0.88 }),
     );
     tracer.rotation.x = Math.PI / 2;
     g.add(tracer);
     const core = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.085, 0.085, 11.4, 6),
-      new THREE.MeshBasicMaterial({ color: 0xfffbeb }),
+      new THREE.CylinderGeometry(coreRad, coreRad, tracerLen + 0.9, 6),
+      new THREE.MeshBasicMaterial({ color: coreHex }),
     );
     core.rotation.x = Math.PI / 2;
     g.add(core);
@@ -1001,20 +1237,91 @@ export function buildTargetStructure(landmark: Omit<TheaterLandmark, 'hp'>): THR
     beacon.position.set(28, 26.2, 0);
     g.add(beacon);
   } else {
-    for (let i = -1; i <= 1; i++) {
-      const hull = new THREE.Mesh(new THREE.BoxGeometry(7, 3.6, 13), steelMat);
-      hull.position.set(i * 12, 2.2, i * 8);
-      g.add(hull);
-      const turret = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.0, 2.0, 8), concreteMat);
-      turret.position.set(i * 12, 4.8, i * 8 - 1);
-      g.add(turret);
-      const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.25, 7.5, 6), steelMat);
-      barrel.rotation.x = Math.PI / 2;
-      barrel.position.set(i * 12, 5.0, i * 8 - 5.2);
-      g.add(barrel);
-      const beacon = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.8, 1.4), hazardMat);
-      beacon.position.set(i * 12, 6.1, i * 8 - 1);
-      g.add(beacon);
+    // 3-Vehicle 8x8 Desert Armored IFV/MRAP Column aligned forward toward -Z
+    const armorMat = new THREE.MeshStandardMaterial({ color: 0x9b8667, roughness: 0.72, metalness: 0.28 });
+    const trimArmorMat = new THREE.MeshStandardMaterial({ color: 0x71614b, roughness: 0.68, metalness: 0.35 });
+    const tireMat = new THREE.MeshStandardMaterial({ color: 0x1e242b, roughness: 0.9, metalness: 0.08 });
+    const visorMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.18, metalness: 0.75 });
+    const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfde68a });
+
+    const hullGeo = new THREE.BoxGeometry(5.6, 2.35, 12.6);
+    const upperDeckGeo = new THREE.BoxGeometry(4.6, 1.3, 8.2);
+    const noseSlopeGeo = new THREE.BoxGeometry(4.8, 1.35, 3.4);
+    const visorGeo = new THREE.BoxGeometry(3.7, 0.65, 0.45);
+    const wheelGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.78, 10);
+    wheelGeo.rotateZ(Math.PI / 2);
+    const turretBaseGeo = new THREE.CylinderGeometry(1.5, 1.85, 1.35, 8);
+    const gunBarrelGeo = new THREE.CylinderGeometry(0.16, 0.2, 5.8, 6);
+    gunBarrelGeo.rotateX(Math.PI / 2);
+    const lampGeo = new THREE.BoxGeometry(0.55, 0.35, 0.25);
+    const whipGeo = new THREE.CylinderGeometry(0.04, 0.06, 4.4, 5);
+    const beaconGeo = new THREE.BoxGeometry(0.75, 0.42, 0.75);
+
+    const offsets: Array<[number, number, number]> = [
+      [0, -21, 0],
+      [-5.5, 1.5, 0.06],
+      [4.8, 24, -0.05],
+    ];
+
+    for (const [ox, oz, yawTrim] of offsets) {
+      const vic = new THREE.Group();
+      vic.position.set(ox, 0, oz);
+      vic.rotation.y = yawTrim;
+
+      const hull = new THREE.Mesh(hullGeo, armorMat);
+      hull.position.y = 2.05;
+      vic.add(hull);
+
+      const upper = new THREE.Mesh(upperDeckGeo, trimArmorMat);
+      upper.position.set(0, 3.6, 0.6);
+      vic.add(upper);
+
+      const nose = new THREE.Mesh(noseSlopeGeo, armorMat);
+      nose.position.set(0, 2.35, -5.8);
+      nose.rotation.x = 0.26;
+      vic.add(nose);
+
+      const visor = new THREE.Mesh(visorGeo, visorMat);
+      visor.position.set(0, 3.55, -3.55);
+      vic.add(visor);
+
+      for (const sideX of [-2.82, 2.82]) {
+        for (const axleZ of [-3.9, -1.3, 1.3, 3.9]) {
+          const wheel = new THREE.Mesh(wheelGeo, tireMat);
+          wheel.position.set(sideX, 0.95, axleZ);
+          wheel.name = 'convoyWheel';
+          vic.add(wheel);
+        }
+      }
+
+      const turret = new THREE.Mesh(turretBaseGeo, trimArmorMat);
+      turret.position.set(0, 4.75, 0.2);
+      vic.add(turret);
+
+      const barrel = new THREE.Mesh(gunBarrelGeo, steelMat);
+      barrel.position.set(0, 4.85, -3.1);
+      vic.add(barrel);
+
+      for (const hx of [-1.75, 1.75]) {
+        const lamp = new THREE.Mesh(lampGeo, headlightMat);
+        lamp.position.set(hx, 2.15, -6.45);
+        vic.add(lamp);
+      }
+
+      const whipL = new THREE.Mesh(whipGeo, steelMat);
+      whipL.position.set(-1.9, 5.9, 3.6);
+      vic.add(whipL);
+
+      const whipR = new THREE.Mesh(whipGeo, steelMat);
+      whipR.position.set(1.9, 5.7, 3.6);
+      whipR.rotation.z = -0.06;
+      vic.add(whipR);
+
+      const beacon = new THREE.Mesh(beaconGeo, hazardMat);
+      beacon.position.set(0, 5.6, 0.2);
+      vic.add(beacon);
+
+      g.add(vic);
     }
   }
 

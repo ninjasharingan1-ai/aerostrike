@@ -1,5 +1,5 @@
 import { STAGE_A_PATHS } from '../assets/assetManifest';
-import { CameraMode, PropulsionSpec } from '../sim/types';
+import { CameraMode, GunAudioProfile, PropulsionSpec } from '../sim/types';
 
 export interface SpatialAudioCoords {
   x?: number;
@@ -404,6 +404,7 @@ export class TacticalAudioSynth {
     coords?: SpatialAudioCoords,
     pitchJitter = 0.04,
     kindLabel = String(stemKey),
+    rateScale = 1.0,
   ): boolean {
     const ctx = this.ctx;
     const buffer = this.buffers.get(stemKey);
@@ -415,9 +416,9 @@ export class TacticalAudioSynth {
     const src = ctx.createBufferSource();
     src.buffer = buffer;
 
-    const jitter = 1 + (Math.random() * 2 - 1) * pitchJitter;
+    const jitter = (1 + (Math.random() * 2 - 1) * pitchJitter) * rateScale;
     const { rate, dist } = this.computeDopplerRate(coords, jitter);
-    src.playbackRate.setValueAtTime(Math.max(0.55, Math.min(1.7, rate)), now);
+    src.playbackRate.setValueAtTime(Math.max(0.55, Math.min(1.85, rate)), now);
 
     const g = ctx.createGain();
     g.gain.setValueAtTime(gainLevel, now);
@@ -513,28 +514,159 @@ export class TacticalAudioSynth {
     osc.stop(now + 0.21);
   }
 
-  public playCannonShot(coords?: SpatialAudioCoords) {
+  public playCannonShot(coords?: SpatialAudioCoords, profile: GunAudioProfile = 'cannon_20mm') {
     if (this.muted) return;
     const ctx = this.ensureContext();
     if (!ctx || !this.buses) return;
 
-    const okTransient = this.playBufferStem('cannonTransient', this.buses.weapons, 0.56, coords, 0.06, 'cannon');
-    const okBody = this.playBufferStem('cannonBody', this.buses.weapons, 0.5, coords, 0.05, 'cannon_body');
-    const okTail = this.playBufferStem('cannonTail', this.buses.weapons, 0.34, coords, 0.04, 'cannon_tail');
-    if (okTransient || okBody || okTail) return;
+    const profileTuning: Record<
+      GunAudioProfile,
+      {
+        stem: keyof typeof STAGE_A_PATHS.audio;
+        layerStem: keyof typeof STAGE_A_PATHS.audio;
+        tailStem: keyof typeof STAGE_A_PATHS.audio | null;
+        rate: number;
+        gain: number;
+        layerGain: number;
+        tailGain: number;
+        oscType: OscillatorType;
+        fStart: number;
+        fEnd: number;
+        dur: number;
+      }
+    > = {
+      gun_light_556: {
+        stem: 'gun556',
+        layerStem: 'cannonTransient',
+        tailStem: null,
+        rate: 1.06,
+        gain: 0.56,
+        layerGain: 0.24,
+        tailGain: 0,
+        oscType: 'triangle',
+        fStart: 320,
+        fEnd: 95,
+        dur: 0.045,
+      },
+      gun_medium_762: {
+        stem: 'gun762',
+        layerStem: 'cannonBody',
+        tailStem: null,
+        rate: 1.0,
+        gain: 0.64,
+        layerGain: 0.28,
+        tailGain: 0,
+        oscType: 'sawtooth',
+        fStart: 215,
+        fEnd: 58,
+        dur: 0.065,
+      },
+      gun_enclosed_mg: {
+        stem: 'gunEnclosed',
+        layerStem: 'cannonBody',
+        tailStem: null,
+        rate: 0.94,
+        gain: 0.58,
+        layerGain: 0.26,
+        tailGain: 0,
+        oscType: 'square',
+        fStart: 185,
+        fEnd: 48,
+        dur: 0.06,
+      },
+      gun_rotary_minigun: {
+        stem: 'gunRotary',
+        layerStem: 'cannonTransient',
+        tailStem: 'cannonTail',
+        rate: 1.14,
+        gain: 0.58,
+        layerGain: 0.34,
+        tailGain: 0.16,
+        oscType: 'sawtooth',
+        fStart: 270,
+        fEnd: 74,
+        dur: 0.042,
+      },
+      gun_rws_250: {
+        stem: 'gunRws250',
+        layerStem: 'cannonBody',
+        tailStem: null,
+        rate: 0.96,
+        gain: 0.66,
+        layerGain: 0.3,
+        tailGain: 0,
+        oscType: 'sawtooth',
+        fStart: 260,
+        fEnd: 68,
+        dur: 0.055,
+      },
+      cannon_20mm: {
+        stem: 'cannon20mm',
+        layerStem: 'cannonBody',
+        tailStem: 'cannonTail',
+        rate: 0.96,
+        gain: 0.72,
+        layerGain: 0.36,
+        tailGain: 0.28,
+        oscType: 'sawtooth',
+        fStart: 155,
+        fEnd: 40,
+        dur: 0.085,
+      },
+    };
+    const tune = profileTuning[profile] ?? profileTuning.cannon_20mm;
+
+    const okPrimary = this.playBufferStem(
+      tune.stem,
+      this.buses.weapons,
+      tune.gain,
+      coords,
+      0.05,
+      `cannon_${profile}`,
+      tune.rate,
+    );
+    const okLayer = this.playBufferStem(
+      tune.layerStem,
+      this.buses.weapons,
+      tune.layerGain,
+      coords,
+      0.06,
+      `cannon_layer_${profile}`,
+      tune.rate * 1.02,
+    );
+    const okTail = tune.tailStem
+      ? this.playBufferStem(
+          tune.tailStem,
+          this.buses.weapons,
+          tune.tailGain,
+          coords,
+          0.04,
+          `cannon_tail_${profile}`,
+          tune.rate * 0.98,
+        )
+      : false;
+    if (okPrimary || okLayer || okTail) return;
 
     const now = ctx.currentTime;
     const osc = ctx.createOscillator();
     const g = ctx.createGain();
-    osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(220, now);
-    osc.frequency.exponentialRampToValueAtTime(52, now + 0.065);
-    g.gain.setValueAtTime(0.1, now);
-    g.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-    osc.connect(g);
+    osc.type = tune.oscType;
+    osc.frequency.setValueAtTime(tune.fStart, now);
+    osc.frequency.exponentialRampToValueAtTime(tune.fEnd, now + tune.dur);
+    g.gain.setValueAtTime(0.11, now);
+    g.gain.exponentialRampToValueAtTime(0.001, now + tune.dur + 0.01);
+    if (profile === 'gun_enclosed_mg') {
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.setValueAtTime(950, now);
+      osc.connect(lp);
+      lp.connect(g);
+    } else {
+      osc.connect(g);
+    }
     g.connect(this.buses.weapons);
     osc.start(now);
-    osc.stop(now + 0.075);
+    osc.stop(now + tune.dur + 0.015);
   }
 
   public playAntiAirBurst(coords?: SpatialAudioCoords) {
@@ -629,6 +761,26 @@ export class TacticalAudioSynth {
     g.connect(this.buses.ui);
     osc.start(now);
     osc.stop(now + 0.13);
+  }
+
+  public playReconMark() {
+    if (this.muted) return;
+    const ctx = this.ensureContext();
+    if (!ctx || !this.buses) return;
+    const now = ctx.currentTime;
+    [980, 1460].forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const g = ctx.createGain();
+      osc.type = 'triangle';
+      const t0 = now + idx * 0.065;
+      osc.frequency.setValueAtTime(freq, t0);
+      g.gain.setValueAtTime(0.08, t0);
+      g.gain.exponentialRampToValueAtTime(0.001, t0 + 0.09);
+      osc.connect(g);
+      g.connect(this.buses!.ui);
+      osc.start(t0);
+      osc.stop(t0 + 0.095);
+    });
   }
 
   public playHitMarker(isKill = false) {

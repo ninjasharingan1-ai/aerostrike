@@ -54,7 +54,10 @@ interface FlightHudProps {
   onCycleCamera: () => void;
   onSelectSlot: (slot: number) => void;
   onFire: () => void;
+  onCycleFireMode: () => void;
+  onRequestPointerLock: () => void;
   onCycleTarget: () => void;
+  onMarkReconTarget?: () => void;
   reticleFrameRef?: React.MutableRefObject<HTMLDivElement | null>;
 }
 
@@ -83,7 +86,10 @@ export const FlightHud: React.FC<FlightHudProps> = ({
   onCycleCamera,
   onSelectSlot,
   onFire,
+  onCycleFireMode,
+  onRequestPointerLock,
   onCycleTarget,
+  onMarkReconTarget,
   reticleFrameRef,
 }) => {
   const airframe = AIRFRAMES[loadout.airframeId];
@@ -320,11 +326,85 @@ export const FlightHud: React.FC<FlightHudProps> = ({
           </div>
         )}
 
-      {/* 6. Floating War Thunder Hit / Destruction Confirmation Callout */}
+      {/* 6. Floating War Thunder / Ace Combat High-Contrast Destruction Box */}
       {hud.combatHitCallout && (
         <div className="fixed left-1/2 top-[34%] -translate-x-1/2 pointer-events-none z-20">
-          <div className="px-3.5 py-1 rounded bg-amber-500/95 border border-amber-200 text-slate-950 font-display font-bold text-xs tracking-wider shadow-lg whitespace-nowrap">
+          <div className="px-5 py-1.5 border-2 border-white/95 bg-[#090e16]/85 text-white font-display font-bold text-xs sm:text-sm tracking-[0.2em] uppercase shadow-lg whitespace-nowrap">
             {hud.combatHitCallout}
+          </div>
+        </div>
+      )}
+
+      {/* 7. EO/IR Reconnaissance Optical Sensor Overlay (Active only in cameraMode === 'eoir') */}
+      {cameraMode === 'eoir' && (
+        <div
+          data-testid="eoir-recon-overlay"
+          className="fixed inset-0 pointer-events-none z-10 flex items-center justify-center"
+        >
+          {/* Thin edge corner framing */}
+          <div className="absolute inset-10 sm:inset-14 pointer-events-none">
+            <div className="absolute top-0 left-0 w-7 h-7 border-t-2 border-l-2 border-cyan-300/80" />
+            <div className="absolute top-0 right-0 w-7 h-7 border-t-2 border-r-2 border-cyan-300/80" />
+            <div className="absolute bottom-0 left-0 w-7 h-7 border-b-2 border-l-2 border-cyan-300/80" />
+            <div className="absolute bottom-0 right-0 w-7 h-7 border-b-2 border-r-2 border-cyan-300/80" />
+          </div>
+
+          {/* EO/IR FLIR Optical Telemetry Header */}
+          <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-[#070d14]/88 border border-cyan-500/55 rounded px-3 py-1 flex items-center gap-3 text-[11px] font-mono-tabular text-cyan-200 whitespace-nowrap shadow">
+            <span className="inline-flex items-center gap-1.5 font-bold text-rose-400">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+              REC · EO/IR FLIR
+            </span>
+            <span className="text-slate-400">|</span>
+            <span>
+              {theater.latDeg.toFixed(2)}°N {Math.abs(theater.lonDeg).toFixed(2)}°W
+            </span>
+            <span className="text-slate-400">|</span>
+            <span>
+              AGL {altAglVal}
+              {altUnit}
+            </span>
+            <span className="text-slate-400">|</span>
+            <span className="text-emerald-300 font-semibold">
+              MARKS {hud.markedTargetIds.length}/{hud.requiredReconMarks}
+            </span>
+          </div>
+
+          {/* Center Optical Crosshair & Dwell Scan Progress */}
+          <div className="relative flex flex-col items-center">
+            <svg viewBox="-40 -40 80 80" className="w-24 h-24 opacity-85" aria-hidden="true">
+              <circle cx="0" cy="0" r="24" fill="none" stroke="#22d3ee" strokeWidth="1" strokeDasharray="6 4" />
+              <line x1="-34" y1="0" x2="-10" y2="0" stroke="#22d3ee" strokeWidth="1.2" />
+              <line x1="10" y1="0" x2="34" y2="0" stroke="#22d3ee" strokeWidth="1.2" />
+              <line x1="0" y1="-34" x2="0" y2="-10" stroke="#22d3ee" strokeWidth="1.2" />
+              <line x1="0" y1="10" x2="0" y2="34" stroke="#22d3ee" strokeWidth="1.2" />
+            </svg>
+            {hud.reconScanProgress > 0 && (
+              <div className="mt-1 bg-[#070d14]/90 border border-cyan-400/60 rounded px-2.5 py-1 flex flex-col items-center gap-1 min-w-[160px]">
+                <span className="text-[10px] font-mono-tabular text-cyan-200 font-semibold">
+                  SCANNING {hud.reconScanTargetName ?? 'CONTACT'} · {Math.round(hud.reconScanProgress * 100)}%
+                </span>
+                <div className="w-36 h-1.5 bg-slate-900 rounded-xs overflow-hidden">
+                  <div
+                    className="h-full bg-cyan-400 transition-all duration-100"
+                    style={{ width: `${Math.round(hud.reconScanProgress * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              tabIndex={-1}
+              data-testid="eoir-mark-btn"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                e.stopPropagation();
+                onMarkReconTarget?.();
+              }}
+              className="mt-3 pointer-events-auto bg-cyan-500/90 hover:bg-cyan-400 text-slate-950 font-mono-tabular font-bold text-[11px] px-3 py-1 rounded border border-cyan-200 cursor-pointer shadow"
+            >
+              [T] MARK TARGET ({hud.markedTargetIds.length}/{hud.requiredReconMarks})
+            </button>
           </div>
         </div>
       )}
@@ -332,7 +412,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
 
       {/* TOP BAR: Compact Left & Right Perimeter Clusters */}
       <div className="relative z-20 flex items-start justify-between gap-4">
-        {/* Top-Left: Theater, Airframe & Solar/Gravity Telemetry */}
+        {/* Top-Left: Theater, Airframe, 5-Phase Mission Status & Target Telemetry */}
         <div className="bg-[#090e16]/85 border border-slate-700/70 rounded px-3.5 py-2.5 pointer-events-auto max-w-xs sm:max-w-md">
           <div className="flex items-center gap-2 text-xs text-slate-300 font-mono-tabular">
             <span className="font-semibold text-amber-400">{airframe.name}</span>
@@ -344,6 +424,22 @@ export const FlightHud: React.FC<FlightHudProps> = ({
                 <span className="text-sky-300 font-bold">ZOOM</span>
               </>
             )}
+          </div>
+          <div
+            data-testid="mission-status-strip"
+            className="mt-1.5 pt-1.5 border-t border-slate-800/90 text-xs font-mono-tabular"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sky-300 font-bold tracking-wide uppercase truncate">
+                PHASE {hud.missionPhaseNumber}/5 · {hud.missionTitle}
+              </span>
+              <span className="text-emerald-300 font-semibold shrink-0">
+                MARKS {hud.markedTargetIds.length}/{hud.requiredReconMarks}
+              </span>
+            </div>
+            <div className="text-[11px] text-slate-300 leading-snug mt-0.5">
+              {hud.missionObjective}
+            </div>
           </div>
           {sandbox.enabled && (
             <div className="mt-1 text-[11px] font-mono-tabular text-cyan-400 font-semibold">
@@ -407,12 +503,20 @@ export const FlightHud: React.FC<FlightHudProps> = ({
             cameraMode === 'chase' &&
             !hud.pointerLocked &&
             !hud.freeLooking && (
-              <div
+              <button
+                type="button"
+                tabIndex={-1}
                 data-testid="pointer-lock-hint"
-                className="bg-[#090e16]/75 border border-slate-700/70 rounded px-2.5 py-0.5 text-[10px] font-mono-tabular text-slate-300"
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  e.stopPropagation();
+                  onRequestPointerLock();
+                }}
+                className="pointer-events-auto bg-[#090e16]/85 hover:bg-slate-800 border border-slate-600/80 rounded px-2.5 py-0.5 text-[10px] font-mono-tabular text-slate-200 cursor-pointer transition-colors"
+                title="Engage mouse capture lock for unbounded turn travel [L]"
               >
-                Click viewport to lock mouse aim · Esc to release
-              </div>
+                LMB — FIRE · Lock Mouse Aim [L]
+              </button>
             )}
 
           {hud.kamikazeArmed && (
@@ -659,6 +763,12 @@ export const FlightHud: React.FC<FlightHudProps> = ({
             const isSelected = hud.activeSlot === idx;
             const ammo = sandbox.infiniteAmmo ? '∞' : hud.slotAmmo[idx];
             const cd = hud.slotCooldowns[idx];
+            const slotMode =
+              w.category === 'cannon'
+                ? isSelected
+                  ? hud.activeFireMode
+                  : loadout.slotFireModes?.[idx] ?? w.defaultFireMode ?? 'auto'
+                : null;
             return (
               <button
                 key={`${wId}-${idx}`}
@@ -680,10 +790,34 @@ export const FlightHud: React.FC<FlightHudProps> = ({
                   </span>
                   <span className="font-bold text-white shrink-0">{cd > 0 ? `${cd.toFixed(1)}s` : `x${ammo}`}</span>
                 </div>
-                <div className="text-[11px] font-medium truncate mt-0.5">{w.name.split(' ')[0]} {w.name.split(' ')[1] ?? ''}</div>
+                <div className="flex items-center justify-between gap-1 text-[11px] font-medium mt-0.5">
+                  <span className="truncate">{w.name.split(' ')[0]} {w.name.split(' ')[1] ?? ''}</span>
+                  {slotMode && (
+                    <span className="text-[9px] font-mono-tabular font-bold text-amber-300 uppercase">
+                      {slotMode}
+                    </span>
+                  )}
+                </div>
               </button>
             );
           })}
+
+          {WEAPONS[loadout.slots[hud.activeSlot]]?.category === 'cannon' && (
+            <button
+              type="button"
+              tabIndex={-1}
+              data-testid="fire-mode-btn"
+              title="Cycle Gun Fire Mode [R]"
+              onClick={(e) => {
+                e.currentTarget.blur();
+                e.stopPropagation();
+                onCycleFireMode();
+              }}
+              className="px-2 py-2 rounded bg-[#090e16]/95 hover:bg-slate-800 border border-amber-500/60 text-amber-300 text-xs font-mono-tabular font-bold cursor-pointer whitespace-nowrap shrink-0"
+            >
+              [R] {hud.activeFireMode.toUpperCase()}
+            </button>
+          )}
 
           {hud.kamikazeCapable && (
             <button
@@ -740,6 +874,7 @@ export const FlightHud: React.FC<FlightHudProps> = ({
             title="Fire / Release Active Ordnance [Left Click / Space]"
             onClick={(e) => {
               e.currentTarget.blur();
+              e.stopPropagation();
               onFire();
             }}
             className="px-2.5 py-2 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-display font-bold text-xs tracking-wide cursor-pointer whitespace-nowrap shrink-0"

@@ -25,6 +25,13 @@ import {
 } from '../sim/arsenalData';
 import { CYBER_PAYLOADS } from '../sim/cyberWarfare';
 import {
+  GUN_SUBCATEGORIES,
+  checkWeaponCompatibility,
+  getAllowedFireModes,
+  normalizeLoadoutConfig,
+  resolveSlotFireMode,
+} from '../sim/weaponCompatibility';
+import {
   canUpgradeSkill,
   PILOT_SKILLS,
   SKILL_BRANCHES,
@@ -33,6 +40,8 @@ import {
 import {
   AirframeId,
   CyberPayloadId,
+  GunFireMode,
+  GunSubcategory,
   LoadoutConfig,
   PilotProgression,
   PilotSkillBonuses,
@@ -62,7 +71,7 @@ interface HangarSandboxModalProps {
 }
 
 type OriginFilter = 'all' | 'Ukraine' | 'Israel' | 'Iran / Syria' | 'Russia' | 'USA / Exp';
-type AmmoCatFilter = 'all' | WeaponCategory;
+type AmmoCatFilter = 'all' | 'uav_gun' | GunSubcategory | Exclude<WeaponCategory, 'cannon'>;
 
 export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
   open,
@@ -164,18 +173,54 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
     return orig.includes(originFilter);
   });
 
-  const filteredWeapons = (Object.keys(WEAPONS) as WeaponId[]).filter(
-    (wId) => ammoFilter === 'all' || WEAPONS[wId].category === ammoFilter,
-  );
+  const filteredWeapons = (Object.keys(WEAPONS) as WeaponId[]).filter((wId) => {
+    const w = WEAPONS[wId];
+    if (ammoFilter === 'all') return true;
+    if (ammoFilter === 'uav_gun') return w.category === 'cannon';
+    if (
+      ammoFilter === 'cat_a_light_rifle' ||
+      ammoFilter === 'cat_b_heavy_multirotor' ||
+      ammoFilter === 'cat_c_rotary_pod' ||
+      ammoFilter === 'cat_d_rws_turret'
+    ) {
+      return w.gunSubcategory === ammoFilter;
+    }
+    return w.category === ammoFilter;
+  });
+
+  const currentFireModes: [GunFireMode, GunFireMode, GunFireMode, GunFireMode] = [
+    resolveSlotFireMode(loadout.slots[0], loadout.slotFireModes?.[0]),
+    resolveSlotFireMode(loadout.slots[1], loadout.slotFireModes?.[1]),
+    resolveSlotFireMode(loadout.slots[2], loadout.slotFireModes?.[2]),
+    resolveSlotFireMode(loadout.slots[3], loadout.slotFireModes?.[3]),
+  ];
 
   const mountWeaponToPylon = (wId: WeaponId, pylonIdx: number) => {
+    const compat = checkWeaponCompatibility(loadout.airframeId, wId, sandbox.enabled);
+    if (!compat.compatible) return;
     const nextSlots = [...loadout.slots] as [WeaponId, WeaponId, WeaponId, WeaponId];
     nextSlots[pylonIdx] = wId;
-    onChangeLoadout({ ...loadout, slots: nextSlots });
+    const nextModes = [...currentFireModes] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
+    nextModes[pylonIdx] = resolveSlotFireMode(wId, undefined);
+    onChangeLoadout({ ...loadout, slots: nextSlots, slotFireModes: nextModes });
   };
 
   const fillAllPylons = (wId: WeaponId) => {
-    onChangeLoadout({ ...loadout, slots: [wId, wId, wId, wId] });
+    const compat = checkWeaponCompatibility(loadout.airframeId, wId, sandbox.enabled);
+    if (!compat.compatible) return;
+    const mode = resolveSlotFireMode(wId, undefined);
+    onChangeLoadout({
+      ...loadout,
+      slots: [wId, wId, wId, wId],
+      slotFireModes: [mode, mode, mode, mode],
+    });
+  };
+
+  const setSlotFireMode = (pylonIdx: number, mode: GunFireMode) => {
+    const wId = loadout.slots[pylonIdx];
+    const nextModes = [...currentFireModes] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
+    nextModes[pylonIdx] = resolveSlotFireMode(wId, mode);
+    onChangeLoadout({ ...loadout, slotFireModes: nextModes });
   };
 
   const pylonLabels = ['Pylon 1 · Left Outer', 'Pylon 2 · Left Inner', 'Pylon 3 · Right Inner', 'Pylon 4 · Right Outer'];
@@ -343,13 +388,18 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                           type="button"
                           disabled={!unlocked}
                           onClick={() =>
-                            onChangeLoadout({
-                              ...loadout,
-                              airframeId: id,
-                              propulsionId: isUnlocked('propulsion', a.defaultPropulsionId)
-                                ? a.defaultPropulsionId
-                                : loadout.propulsionId,
-                            })
+                            onChangeLoadout(
+                              normalizeLoadoutConfig(
+                                {
+                                  ...loadout,
+                                  airframeId: id,
+                                  propulsionId: isUnlocked('propulsion', a.defaultPropulsionId)
+                                    ? a.defaultPropulsionId
+                                    : loadout.propulsionId,
+                                },
+                                sandbox.enabled,
+                              ),
+                            )
                           }
                           className={`p-3 rounded border text-left transition-colors ${
                             !unlocked
@@ -472,16 +522,16 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                       return (
                         <div
                           key={slotIdx}
-                          className="bg-slate-900/75 border border-slate-800 rounded p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                          className="bg-slate-900/75 border border-slate-800 rounded p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5"
                         >
-                          <div>
+                          <div className="min-w-0 flex-1">
                             <label
                               htmlFor={`pylon-slot-${slotIdx}`}
-                              className="text-xs font-semibold text-amber-400 font-mono-tabular"
+                              className="text-xs font-semibold text-amber-400 font-mono-tabular block"
                             >
                               {pylonLabels[slotIdx]}
                             </label>
-                            <div className="text-[11px] text-slate-400">
+                            <div className="text-[11px] text-slate-400 truncate">
                               {WEAPONS[currentW].origin} · x{WEAPONS[currentW].ammoPerSlot} · {WEAPONS[currentW].warheadKg}kg WH
                             </div>
                           </div>
@@ -489,14 +539,22 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                             id={`pylon-slot-${slotIdx}`}
                             value={currentW}
                             onChange={(e) => mountWeaponToPylon(e.target.value as WeaponId, slotIdx)}
-                            className="bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
+                            className="w-full sm:w-64 shrink-0 bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-xs text-white focus:border-amber-400 outline-none"
                           >
                             {(Object.keys(WEAPONS) as WeaponId[]).map((wId) => {
                               const w = WEAPONS[wId];
                               const unlocked = isUnlocked('weapon', wId);
+                              const compat = checkWeaponCompatibility(loadout.airframeId, wId, sandbox.enabled);
                               return (
-                                <option key={wId} value={wId} disabled={!unlocked}>
-                                  {w.name} ({w.natoCode}){!unlocked ? ' [Locked]' : ''}
+                                <option key={wId} value={wId} disabled={!unlocked || !compat.compatible}>
+                                  {w.name} ({w.natoCode})
+                                  {!unlocked
+                                    ? ' [Locked]'
+                                    : !compat.compatible
+                                      ? ' [Airframe Incompatible]'
+                                      : compat.sandboxOverrideUsed
+                                        ? ' [Sandbox]'
+                                        : ''}
                                 </option>
                               );
                             })}
@@ -540,28 +598,62 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                     const wId = loadout.slots[idx];
                     const w = WEAPONS[wId];
                     const isSelected = selectedPylonIdx === idx;
+                    const compat = checkWeaponCompatibility(loadout.airframeId, wId, sandbox.enabled);
+                    const allowedModes = w.category === 'cannon' ? getAllowedFireModes(wId) : [];
+                    const activeMode = currentFireModes[idx];
                     return (
-                      <button
+                      <div
                         key={idx}
-                        type="button"
-                        onClick={() => setSelectedPylonIdx(idx)}
-                        className={`p-3 rounded border text-left transition-colors cursor-pointer ${
+                        className={`rounded border transition-colors flex flex-col justify-between ${
                           isSelected
                             ? 'bg-amber-500/15 border-amber-400 ring-1 ring-amber-400/50'
                             : 'bg-slate-950/75 border-slate-800 hover:border-slate-600'
                         }`}
                       >
-                        <div className="flex items-center justify-between text-[11px] font-mono-tabular">
-                          <span className={isSelected ? 'text-amber-300 font-bold' : 'text-slate-400'}>
-                            {pylonLabels[idx]}
-                          </span>
-                          <span className="text-white font-semibold">x{w.ammoPerSlot}</span>
-                        </div>
-                        <div className="text-xs font-semibold text-white mt-1 truncate">{w.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono-tabular mt-0.5">
-                          {w.natoCode} · {w.warheadKg}kg WH · {w.blastRadiusM}m blast
-                        </div>
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => setSelectedPylonIdx(idx)}
+                          className="p-3 text-left w-full cursor-pointer"
+                        >
+                          <div className="flex items-center justify-between text-[11px] font-mono-tabular">
+                            <span className={isSelected ? 'text-amber-300 font-bold' : 'text-slate-400'}>
+                              {pylonLabels[idx]}
+                            </span>
+                            <span className="text-white font-semibold">x{w.ammoPerSlot}</span>
+                          </div>
+                          <div className="text-xs font-semibold text-white mt-1 truncate">{w.name}</div>
+                          <div className="text-[11px] text-slate-400 font-mono-tabular mt-0.5">
+                            {w.natoCode} · {w.warheadKg}kg WH · {w.blastRadiusM}m blast
+                          </div>
+                          {compat.sandboxOverrideUsed && (
+                            <div className="text-[10px] font-mono-tabular text-cyan-300 mt-1">
+                              Sandbox Override Active
+                            </div>
+                          )}
+                        </button>
+
+                        {allowedModes.length > 0 && (
+                          <div className="px-3 pb-2.5 pt-1.5 border-t border-slate-800/70 flex items-center justify-between gap-1">
+                            <span className="text-[10px] font-mono-tabular text-slate-400">Fire Mode:</span>
+                            <div className="flex items-center gap-1">
+                              {allowedModes.map((m) => (
+                                <button
+                                  key={m}
+                                  type="button"
+                                  onClick={() => setSlotFireMode(idx, m)}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono-tabular uppercase font-bold border cursor-pointer ${
+                                    activeMode === m
+                                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                      : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                                  }`}
+                                >
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -571,21 +663,60 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                   <div className="flex flex-wrap items-center gap-1.5">
                     <span className="text-[11px] text-slate-400 mr-1">Doctrine Presets:</span>
                     {[
-                      { label: 'Bayraktar Anti-Armor', slots: ['mam_l', 'mam_c', 'r73_archer', 'm61_vulcan'] as [WeaponId, WeaponId, WeaponId, WeaponId] },
-                      { label: 'Baba Yaga Drop Raid', slots: ['pg7vl_drop', 'pg7vl_drop', 'mam_c', 'm61_vulcan'] as [WeaponId, WeaponId, WeaponId, WeaponId] },
-                      { label: 'Iran/Russia OWA Raid', slots: ['qaem_5', 'kab_20', 'mam_c', 'r73_archer'] as [WeaponId, WeaponId, WeaponId, WeaponId] },
-                      { label: 'Israel Spike SEAD', slots: ['spike_nlos', 'gbu39_sdb', 'aim9x_sidewinder', 'm61_vulcan'] as [WeaponId, WeaponId, WeaponId, WeaponId] },
+                      {
+                        label: 'Bayraktar Close Support',
+                        slots: ['mam_l', 'mam_c', 'r73_archer', 'fire_storm_250'] as [WeaponId, WeaponId, WeaponId, WeaponId],
+                        modes: ['single', 'single', 'single', 'auto'] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+                      },
+                      {
+                        label: 'Mojave DAP-6 Gunship',
+                        recommendedAirframe: 'mojave_ucav' as AirframeId,
+                        slots: ['agm114_hellfire', 'agm114_hellfire', 'dap6_minigun_pod', 'dap6_minigun_pod'] as [WeaponId, WeaponId, WeaponId, WeaponId],
+                        modes: ['single', 'single', 'auto', 'auto'] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+                      },
+                      {
+                        label: 'Baba Yaga Gun-Dropper',
+                        slots: ['pg7vl_drop', 'pg7vl_drop', 'songar_762', 'tikad_mg'] as [WeaponId, WeaponId, WeaponId, WeaponId],
+                        modes: ['single', 'single', 'auto', 'burst'] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+                      },
+                      {
+                        label: 'Israel Spike / FS-250 SEAD',
+                        slots: ['spike_nlos', 'gbu39_sdb', 'aim9x_sidewinder', 'fire_storm_250'] as [WeaponId, WeaponId, WeaponId, WeaponId],
+                        modes: ['single', 'single', 'single', 'auto'] as [GunFireMode, GunFireMode, GunFireMode, GunFireMode],
+                      },
                     ].map((preset) => {
-                      const allOk = preset.slots.every((w) => isUnlocked('weapon', w));
+                      const targetAf = preset.recommendedAirframe ?? loadout.airframeId;
+                      const airframeOk = !preset.recommendedAirframe || isUnlocked('airframe', preset.recommendedAirframe);
+                      const weaponsUnlocked = preset.slots.every((w) => isUnlocked('weapon', w));
+                      const compatOk = preset.slots.every((w) => checkWeaponCompatibility(targetAf, w, sandbox.enabled).compatible);
+                      const allOk = airframeOk && weaponsUnlocked && compatOk;
                       return (
                         <button
                           key={preset.label}
                           type="button"
                           disabled={!allOk}
-                          title={allOk ? 'Apply 4-pylon doctrine preset' : 'Unlock required weapons below first'}
+                          title={
+                            allOk
+                              ? preset.recommendedAirframe
+                                ? `Switch to ${AIRFRAMES[preset.recommendedAirframe].name} & apply preset`
+                                : 'Apply 4-pylon doctrine preset'
+                              : !compatOk
+                                ? 'Requires compatible heavy-pod airframe or Sandbox Override'
+                                : 'Unlock required airframe/weapons first'
+                          }
                           onClick={() => {
                             if (allOk) {
-                              onChangeLoadout({ ...loadout, slots: preset.slots });
+                              onChangeLoadout({
+                                ...loadout,
+                                airframeId: targetAf,
+                                propulsionId:
+                                  preset.recommendedAirframe &&
+                                  isUnlocked('propulsion', AIRFRAMES[targetAf].defaultPropulsionId)
+                                    ? AIRFRAMES[targetAf].defaultPropulsionId
+                                    : loadout.propulsionId,
+                                slots: preset.slots,
+                                slotFireModes: preset.modes,
+                              });
                             }
                           }}
                           className={`px-2.5 py-1 rounded border text-[11px] inline-flex items-center gap-1 ${
@@ -607,19 +738,23 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { id: 'all', label: 'All Munitions' },
+                  { id: 'uav_gun', label: 'UAV Guns · All' },
+                  { id: 'cat_a_light_rifle', label: 'Cat A · Light Rifle' },
+                  { id: 'cat_b_heavy_multirotor', label: 'Cat B · Heavy Multirotor' },
+                  { id: 'cat_c_rotary_pod', label: 'Cat C · Rotary Pod' },
+                  { id: 'cat_d_rws_turret', label: 'Cat D · Tactical RWS' },
                   { id: 'glide_bomb', label: 'Glide Bombs' },
-                  { id: 'drop_bomb', label: 'HEAT / Mortar Drop Racks' },
+                  { id: 'drop_bomb', label: 'Drop Racks' },
                   { id: 'atgm', label: 'ATGMs' },
                   { id: 'aam', label: 'Air-to-Air' },
                   { id: 'cruise_missile', label: 'Cruise Missiles' },
                   { id: 'ballistic_missile', label: 'Ballistic' },
-                  { id: 'cannon', label: 'Autocannons' },
                 ].map((cat) => (
                   <button
                     key={cat.id}
                     type="button"
                     onClick={() => setAmmoFilter(cat.id as AmmoCatFilter)}
-                    className={`px-3 py-1.5 rounded border text-xs font-medium cursor-pointer ${
+                    className={`px-2.5 py-1 rounded border text-xs font-medium cursor-pointer ${
                       ammoFilter === cat.id
                         ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
                         : 'bg-slate-900 border-slate-800 text-slate-300 hover:border-slate-600'
@@ -635,9 +770,11 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                 {filteredWeapons.map((wId) => {
                   const w = WEAPONS[wId];
                   const unlocked = isUnlocked('weapon', wId);
+                  const compat = checkWeaponCompatibility(loadout.airframeId, wId, sandbox.enabled);
                   const canAfford = progression.researchCredits >= w.unlockCostRc && progression.rank >= w.requiredRank;
                   const mountedCount = loadout.slots.filter((s) => s === wId).length;
                   const onActiveSlot = loadout.slots[selectedPylonIdx] === wId;
+                  const gunSub = w.gunSubcategory ? GUN_SUBCATEGORIES[w.gunSubcategory] : null;
 
                   return (
                     <div
@@ -655,8 +792,14 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                           <div>
                             <div className="text-[10px] font-mono-tabular uppercase tracking-wider text-amber-400">
                               {w.origin} · {w.natoCode}
+                              {gunSub ? ` · ${gunSub.badge}` : ''}
                             </div>
                             <div className="text-sm font-bold text-white mt-0.5">{w.name}</div>
+                            {gunSub && (
+                              <div className="text-[10px] font-mono-tabular text-sky-300 mt-0.5">
+                                {w.mountCategory} · {w.caliberLabel}
+                              </div>
+                            )}
                           </div>
                           {mountedCount > 0 && (
                             <span className="text-[10px] font-mono-tabular font-bold text-emerald-300 shrink-0">
@@ -666,6 +809,30 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                         </div>
 
                         <p className="text-[11px] text-slate-400 mt-1.5 leading-snug">{w.summary}</p>
+
+                        {w.fireModes && w.fireModes.length > 0 && (
+                          <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px] font-mono-tabular">
+                            <span className="text-slate-400">Modes:</span>
+                            {w.fireModes.map((fm) => (
+                              <span
+                                key={fm}
+                                className="px-1.5 py-0.5 rounded bg-slate-950 border border-slate-700 text-amber-200 uppercase"
+                              >
+                                {fm}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+
+                        {!compat.compatible ? (
+                          <div className="mt-2 px-2 py-1 rounded bg-rose-950/70 border border-rose-500/40 text-[10px] font-mono-tabular text-rose-200">
+                            Incompatible ({airframe.name}): {compat.reason}
+                          </div>
+                        ) : compat.sandboxOverrideUsed ? (
+                          <div className="mt-2 px-2 py-1 rounded bg-cyan-950/60 border border-cyan-500/40 text-[10px] font-mono-tabular text-cyan-200">
+                            Sandbox Override Allowed ({compat.reason})
+                          </div>
+                        ) : null}
 
                         <div className="grid grid-cols-3 gap-1.5 mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-mono-tabular text-slate-300">
                           <div>DMG: <strong className="text-white">{w.damage}</strong></div>
@@ -681,15 +848,25 @@ export const HangarSandboxModal: React.FC<HangarSandboxModalProps> = ({
                         <div className="flex items-center gap-2 pt-1">
                           <button
                             type="button"
+                            disabled={!compat.compatible}
                             onClick={() => mountWeaponToPylon(wId, selectedPylonIdx)}
-                            className="flex-1 px-2.5 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-slate-950 font-semibold text-xs cursor-pointer"
+                            className={`flex-1 px-2.5 py-1.5 rounded font-semibold text-xs ${
+                              compat.compatible
+                                ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer'
+                                : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                            }`}
                           >
-                            Mount Pylon [{selectedPylonIdx + 1}]
+                            {compat.compatible ? `Mount Pylon [${selectedPylonIdx + 1}]` : 'Airframe Incompatible'}
                           </button>
                           <button
                             type="button"
+                            disabled={!compat.compatible}
                             onClick={() => fillAllPylons(wId)}
-                            className="px-2.5 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium cursor-pointer"
+                            className={`px-2.5 py-1.5 rounded text-xs font-medium ${
+                              compat.compatible
+                                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer'
+                                : 'bg-slate-900 text-slate-600 cursor-not-allowed'
+                            }`}
                           >
                             Fill All 4
                           </button>

@@ -26,6 +26,7 @@ import {
   CyberPayloadId,
   DroneFlightState,
   GamePhase,
+  GunFireMode,
   HudSnapshot,
   LoadoutConfig,
   PilotSkillBonuses,
@@ -46,7 +47,10 @@ export interface SimCommandBridge {
   resetSortie: (theaterId?: TheaterId) => void;
   setActiveSlot: (slot: number) => void;
   fireActiveOrdnance: () => void;
+  cycleFireMode: () => GunFireMode;
+  requestPointerLock: () => void;
   cycleTarget: () => void;
+  markReconTarget: () => { marked: boolean; targetName: string | null };
   deployFlares: () => boolean;
   armKamikazeDive: () => boolean;
   setWaypointTarget: (x: number, z: number) => void;
@@ -582,6 +586,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
     let lastRollInput = 0;
     let lastPitchInput = 0;
     let lastYawInput = 0;
+    let rotarySpinRate = 0;
 
     sharedAssetPipeline
       .loadHdriEnvironment(STAGE_A_PATHS.hdriDesert, renderer)
@@ -628,6 +633,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         const mesh = buildTargetStructure(lm);
         const y = Math.max(theater.waterLevelM, groundHeightAt(theaterId, lm.x, lm.z));
         mesh.position.set(lm.x, y, lm.z);
+        mesh.rotation.y = lm.headingRad ?? 0;
         mesh.visible = lm.hp > 0;
         theaterGroup.add(mesh);
         landmarkMeshes.set(lm.id, mesh);
@@ -656,7 +662,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
             break;
           case 'ordnance_spawned': {
             const spec = WEAPONS[ev.ord.weaponId];
-            const mesh = buildOrdnanceMesh(spec.category);
+            const mesh = buildOrdnanceMesh(spec.category, ev.ord.weaponId);
             mesh.position.set(ev.ord.x, ev.ord.y, ev.ord.z);
             scene.add(mesh);
             ordnanceMeshes.set(ev.ord.id, mesh);
@@ -702,8 +708,10 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
               typeof ev.x === 'number' && typeof ev.y === 'number' && typeof ev.z === 'number'
                 ? { x: ev.x, y: ev.y, z: ev.z, vx: ev.vx, vy: ev.vy, vz: ev.vz }
                 : undefined;
-            if (ev.kind === 'cannon') audio.playCannonShot(coords);
-            else if (ev.kind === 'glide_release') audio.playGlideRelease(coords);
+            if (ev.kind === 'cannon') {
+              audio.playCannonShot(coords, ev.gunProfile);
+              rotarySpinRate = Math.min(54, rotarySpinRate + 26);
+            } else if (ev.kind === 'glide_release') audio.playGlideRelease(coords);
             else if (ev.kind === 'missile_launch') audio.playMissileLaunch(Boolean(ev.isBallistic), coords);
             else if (ev.kind === 'lock_chirp') audio.playLockChirp();
             else if (ev.kind === 'hit_marker') audio.playHitMarker(Boolean(ev.isKill));
@@ -714,6 +722,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
             else if (ev.kind === 'cyber_purge') audio.playCyberPurge();
             else if (ev.kind === 'cyber_alert') audio.playCyberAlert();
             else if (ev.kind === 'kamikaze_siren') audio.playKamikazeLockSiren();
+            else if (ev.kind === 'recon_mark') audio.playReconMark();
             break;
           }
           case 'game_over':
@@ -762,9 +771,20 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         hudEmitAccum = 0.1;
       } else if (code === 'Space') {
         e.preventDefault();
-        const res = world.fireActiveOrdnance(true, propsRef.current.remotePilots);
-        dispatchSimEvents(res.events);
-        if (res.fired) hudEmitAccum = 0.1;
+        if (!e.repeat) {
+          const res = world.fireActiveOrdnance(true, propsRef.current.remotePilots);
+          dispatchSimEvents(res.events);
+          if (res.fired) hudEmitAccum = 0.1;
+        }
+      } else if (code === 'KeyL') {
+        if (!e.repeat) {
+          e.preventDefault();
+          if (mouseInput.pointerLocked) {
+            releasePointerLock();
+          } else {
+            requestCanvasPointerLock();
+          }
+        }
       } else if (code === 'KeyF') {
         e.preventDefault();
         const res = world.deployFlares(true);
@@ -778,6 +798,18 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       } else if (code === 'KeyZ') {
         e.preventDefault();
         zoomToggled = !zoomToggled;
+      } else if (code === 'KeyR' && !e.repeat) {
+        const activeW = world.config.loadout.slots[world.activeSlot];
+        if (WEAPONS[activeW]?.category === 'cannon') {
+          e.preventDefault();
+          world.cycleActiveFireMode();
+          hudEmitAccum = 0.1;
+        }
+      } else if (code === 'KeyT' && !e.repeat) {
+        e.preventDefault();
+        const res = world.markReconTarget();
+        dispatchSimEvents(res.events);
+        hudEmitAccum = 0.1;
       }
     };
 
@@ -806,6 +838,34 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       }
     };
 
+    const requestCanvasPointerLock = () => {
+      const p = propsRef.current;
+      if (
+        p.phase !== 'playing' ||
+        p.settings.controls.scheme !== 'mouse_aim' ||
+        p.cameraMode !== 'chase' ||
+        mouseInput.pointerLocked ||
+        typeof renderer.domElement.requestPointerLock !== 'function'
+      ) {
+        return;
+      }
+      pointerLockRejected = false;
+      try {
+        const lockResult = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
+        if (lockResult && typeof lockResult.catch === 'function') {
+          lockResult.catch(() => {
+            pointerLockRejected = true;
+            handleMousePointerLockError(mouseInput);
+            hudEmitAccum = 0.1;
+          });
+        }
+      } catch {
+        pointerLockRejected = true;
+        handleMousePointerLockError(mouseInput);
+      }
+      hudEmitAccum = 0.1;
+    };
+
     const getPointerRoute = (): PointerRoute => {
       const p = propsRef.current;
       if (p.phase !== 'playing') return 'none';
@@ -832,6 +892,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
     const handlePointerLockChange = () => {
       const isLocked = document.pointerLockElement === renderer.domElement;
+      mouseFireHeld = false;
       handleMousePointerLockChange(mouseInput, isLocked);
       if (isLocked) {
         pointerLockRejected = false;
@@ -842,6 +903,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
 
     const handlePointerLockError = () => {
       pointerLockRejected = true;
+      mouseFireHeld = false;
       handleMousePointerLockError(mouseInput);
       world.clearPendingAimDeltas();
       hudEmitAccum = 0.1;
@@ -860,31 +922,9 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       audio.warmUp();
       const p = propsRef.current;
       if (p.phase !== 'playing') return;
+      if (e.target !== renderer.domElement) return;
 
-      if (
-        e.button === 0 &&
-        p.settings.controls.scheme === 'mouse_aim' &&
-        p.cameraMode === 'chase' &&
-        !mouseInput.pointerLocked &&
-        !pointerLockRejected &&
-        typeof renderer.domElement.requestPointerLock === 'function'
-      ) {
-        handleMousePointerEnter(mouseInput, e.clientX, e.clientY);
-        try {
-          const lockResult = renderer.domElement.requestPointerLock() as unknown as Promise<void> | undefined;
-          if (lockResult && typeof lockResult.catch === 'function') {
-            lockResult.catch(() => {
-              pointerLockRejected = true;
-              handleMousePointerLockError(mouseInput);
-            });
-          }
-        } catch {
-          pointerLockRejected = true;
-          handleMousePointerLockError(mouseInput);
-        }
-        hudEmitAccum = 0.1;
-        return;
-      }
+      handleMousePointerEnter(mouseInput, e.clientX, e.clientY);
 
       if (e.button === 0) {
         mouseFireHeld = true;
@@ -961,9 +1001,21 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         dispatchSimEvents(res.events);
         if (res.fired) hudEmitAccum = 0.1;
       },
+      cycleFireMode: () => {
+        const nextMode = world.cycleActiveFireMode();
+        hudEmitAccum = 0.1;
+        return nextMode;
+      },
+      requestPointerLock: requestCanvasPointerLock,
       cycleTarget: () => {
         dispatchSimEvents(world.cycleTarget(propsRef.current.remotePilots));
         hudEmitAccum = 0.1;
+      },
+      markReconTarget: () => {
+        const res = world.markReconTarget();
+        dispatchSimEvents(res.events);
+        hudEmitAccum = 0.1;
+        return { marked: res.marked, targetName: res.targetName };
       },
       deployFlares: () => {
         const res = world.deployFlares(propsRef.current.phase === 'playing');
@@ -1061,6 +1113,31 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           theaterName: theater.name,
           landmarkNames: world.landmarks.map((l) => l.name),
           lastVfxEvent,
+          ordnance: {
+            activeSlot: world.activeSlot,
+            activeWeaponId: world.config.loadout.slots[world.activeSlot],
+            activeFireMode: world.getActiveFireMode(),
+            slotAmmo: [...world.slotAmmo],
+            activeOrdnanceCount: world.activeOrdnance.length,
+          },
+          mission: {
+            phase: world.mission.phase,
+            phaseNumber: world.mission.phaseNumber,
+            markedTargetIds: [...world.mission.markedTargetIds],
+            reconScanProgress: Number(world.mission.reconScanProgress.toFixed(2)),
+            convoyLandmark: (() => {
+              const c = world.landmarks.find((l) => l.type === 'convoy');
+              return c
+                ? {
+                    id: c.id,
+                    x: Number(c.x.toFixed(1)),
+                    z: Number(c.z.toFixed(1)),
+                    hp: c.hp,
+                    headingRad: Number((c.headingRad ?? 0).toFixed(3)),
+                  }
+                : null;
+            })(),
+          },
           mouseAim: {
             ...world.getAimTelemetry(),
             scheme: propsRef.current.settings.controls.scheme,
@@ -1311,7 +1388,25 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
         audio.updateEngine(d.throttle, d.mach, world.getPropulsionLabel(), p.cameraMode, weather.windSpeedMs);
       }
       skyUniforms['sunPosition'].value.set(solar.sunDirX, solar.sunDirY, solar.sunDirZ);
-      skyUniforms['turbidity'].value = 1.45 + weather.cloudCover * 6.5;
+      const isSector04GoldenHour =
+        world.config.theaterId === 'edwards' && solar.elevationDeg > 2 && solar.elevationDeg <= 24;
+      if (isSector04GoldenHour) {
+        skyUniforms['turbidity'].value = 2.8 + weather.cloudCover * 5.0;
+        skyUniforms['rayleigh'].value = 1.45;
+        skyUniforms['mieCoefficient'].value = 0.0065;
+        skyUniforms['mieDirectionalG'].value = 0.86;
+        hemiLight.color.setHex(0xf5c894);
+        hemiLight.groundColor.setHex(0x6b4c30);
+        hemiLight.intensity = 0.86;
+      } else {
+        skyUniforms['turbidity'].value = 1.45 + weather.cloudCover * 6.5;
+        skyUniforms['rayleigh'].value = 0.58;
+        skyUniforms['mieCoefficient'].value = 0.0018;
+        skyUniforms['mieDirectionalG'].value = 0.78;
+        hemiLight.color.setHex(0xaad1f0);
+        hemiLight.groundColor.setHex(0x5c4732);
+        hemiLight.intensity = solar.isDaylight ? 0.72 : 0.35;
+      }
 
       sunLight.position.set(
         d.x + solar.sunDirX * 1200,
@@ -1320,19 +1415,32 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       );
       sunLight.target.position.set(d.x, 0, d.z);
       sunLight.color.setHex(solar.sunColorHex);
-      sunLight.intensity = solar.isDaylight ? 1.85 * (1 - weather.cloudCover * 0.45) : 0.45;
-      hemiLight.intensity = solar.isDaylight ? 0.72 : 0.35;
+      sunLight.intensity = solar.isDaylight
+        ? (isSector04GoldenHour ? 2.15 : 1.85) * (1 - weather.cloudCover * 0.45)
+        : 0.45;
 
       const fog = scene.fog as THREE.FogExp2;
       const fogHex = p.weatherId === 'desert_dust' ? 0xb89668 : solar.fogColorHex;
       fog.color.setHex(fogHex);
       fog.density = weather.fogDensity;
 
-      // Rotate radar dishes & sync AI + Ordnance + Player Three.js meshes
+      // Rotate radar dishes & advance terrain-grounded moving convoys
       for (const lm of world.landmarks) {
-        if (lm.hp > 0 && lm.type === 'radar') {
-          const scanner = landmarkMeshes.get(lm.id)?.getObjectByName('radarScanner');
+        if (lm.hp <= 0) continue;
+        const lmGroup = landmarkMeshes.get(lm.id);
+        if (!lmGroup) continue;
+        if (lm.type === 'radar') {
+          const scanner = lmGroup.getObjectByName('radarScanner');
           if (scanner) scanner.rotation.y += visualDt * 1.8;
+        } else if (lm.type === 'convoy') {
+          const cy = Math.max(theater.waterLevelM, groundHeightAt(world.config.theaterId, lm.x, lm.z));
+          lmGroup.position.set(lm.x, cy, lm.z);
+          lmGroup.rotation.y = lm.headingRad ?? 0;
+          lmGroup.traverse((child) => {
+            if (child.name === 'convoyWheel') {
+              child.rotation.x -= visualDt * 7.5;
+            }
+          });
         }
       }
 
@@ -1370,6 +1478,13 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
       for (const prop of playerMeshHandle.propellers) {
         prop.rotation.z += visualDt * (22 + d.throttle * 44);
       }
+      if (playerMeshHandle.rotaryClusters && playerMeshHandle.rotaryClusters.length > 0) {
+        for (const cluster of playerMeshHandle.rotaryClusters) {
+          cluster.rotation.z += visualDt * rotarySpinRate;
+        }
+      }
+      rotarySpinRate *= Math.exp(-5.5 * visualDt);
+      if (rotarySpinRate < 0.05) rotarySpinRate = 0;
       if (playerMeshHandle.aileronsPort) {
         for (const a of playerMeshHandle.aileronsPort) a.rotation.x = lastRollInput * 0.34;
       }
@@ -1839,6 +1954,7 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           fuelPct: Math.round((d.fuelKg / Math.max(1, d.maxFuelKg)) * 100),
           stalling: d.stalling,
           activeSlot: world.activeSlot,
+          activeFireMode: world.getActiveFireMode(),
           slotAmmo: [...world.slotAmmo] as [number, number, number, number],
           slotCooldowns: world.slotCooldowns.map((c) => Number(c.toFixed(1))) as [number, number, number, number],
           lockedTargetId: tgt.id,
@@ -1892,6 +2008,15 @@ export const FlightViewport: React.FC<FlightViewportProps> = (props) => {
           freeLooking,
           combatHitCallout: world.combatHitCallout,
           airContacts,
+          missionPhase: world.mission.phase,
+          missionPhaseNumber: world.mission.phaseNumber,
+          missionTitle: world.mission.title,
+          missionObjective: world.mission.objective,
+          markedTargetIds: [...world.mission.markedTargetIds],
+          requiredReconMarks: world.mission.requiredReconMarks,
+          reconScanProgress: Number(world.mission.reconScanProgress.toFixed(2)),
+          reconScanTargetName:
+            world.landmarks.find((l) => l.id === world.mission.reconScanTargetId)?.name ?? null,
         });
       }
 

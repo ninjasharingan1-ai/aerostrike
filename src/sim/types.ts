@@ -2,6 +2,7 @@ export type GamePhase = 'title' | 'playing' | 'paused' | 'gameover';
 
 export type AirframeId =
   | 'mq9x'
+  | 'mojave_ucav'
   | 'bayraktar_tb2'
   | 'punisher_ua'
   | 'baba_yaga'
@@ -14,6 +15,37 @@ export type AirframeId =
   | 'akinci'
   | 'xq58a'
   | 'switchblade_x';
+
+export type AirframeClass =
+  | 'light_multirotor'
+  | 'heavy_multirotor'
+  | 'tactical_uav'
+  | 'heavy_pod_uav'
+  | 'stealth_jet';
+
+export type GunSubcategory =
+  | 'cat_a_light_rifle'
+  | 'cat_b_heavy_multirotor'
+  | 'cat_c_rotary_pod'
+  | 'cat_d_rws_turret';
+
+export type GunFireMode = 'single' | 'burst' | 'auto';
+
+export type WeaponFamily =
+  | 'uav_gun'
+  | 'guided_missile'
+  | 'glide_bomb'
+  | 'drop_bomb'
+  | 'air_to_air'
+  | 'standoff_strike';
+
+export type GunAudioProfile =
+  | 'gun_light_556'
+  | 'gun_medium_762'
+  | 'gun_enclosed_mg'
+  | 'gun_rotary_minigun'
+  | 'gun_rws_250'
+  | 'cannon_20mm';
 
 export type PropulsionId = 'turboprop_900' | 'piston_md550' | 'hex_electric' | 'edf_quiet' | 'turbofan_22kn' | 'ramjet_exp';
 export type SensorId = 'eoir_das4' | 'aesa_apg81' | 'ew_jammer' | 'solar_optical';
@@ -31,6 +63,11 @@ export type WeaponId =
   | 'agm158_jassm'
   | 'mim140_ballistic'
   | 'aim9x_sidewinder'
+  | 'songar_556'
+  | 'songar_762'
+  | 'tikad_mg'
+  | 'dap6_minigun_pod'
+  | 'fire_storm_250'
   | 'm61_vulcan';
 
 export type CyberPayloadId =
@@ -82,6 +119,8 @@ export interface AirframeSpec {
   designation: string;
   role: string;
   origin: string;
+  airframeClass: AirframeClass;
+  maxPylonPayloadKg: number;
   dryMassKg: number;
   maxFuelKg: number;
   wingAreaM2: number;
@@ -143,6 +182,18 @@ export interface WeaponSpec {
   natoCode: string;
   origin: string;
   category: WeaponCategory;
+  weaponFamily: WeaponFamily;
+  gunSubcategory?: GunSubcategory;
+  mountCategory?: string;
+  caliberLabel?: string;
+  fireModes?: GunFireMode[];
+  defaultFireMode?: GunFireMode;
+  burstCount?: number;
+  burstIntervalSec?: number;
+  compatibleAirframeClasses?: AirframeClass[];
+  verifiedAirframeIds?: AirframeId[];
+  rotaryBarrels?: number;
+  audioProfile?: GunAudioProfile;
   massKg: number;
   warheadKg: number;
   blastRadiusM: number;
@@ -187,6 +238,7 @@ export interface TheaterLandmark {
   maxHp: number;
   points: number;
   threatRadiusM?: number;
+  headingRad?: number;
 }
 
 export interface TheaterSpec {
@@ -221,6 +273,7 @@ export interface LoadoutConfig {
   propulsionId: PropulsionId;
   sensorId: SensorId;
   slots: [WeaponId, WeaponId, WeaponId, WeaponId];
+  slotFireModes?: [GunFireMode, GunFireMode, GunFireMode, GunFireMode];
 }
 
 export interface SolarState {
@@ -432,6 +485,7 @@ export interface HudSnapshot {
   fuelPct: number;
   stalling: boolean;
   activeSlot: number;
+  activeFireMode: GunFireMode;
   slotAmmo: [number, number, number, number];
   slotCooldowns: [number, number, number, number];
   lockedTargetId: string | null;
@@ -478,4 +532,12 @@ export interface HudSnapshot {
   aimEdgeAngleDeg: number;
   combatHitCallout: string | null;
   airContacts: AirContactHud[];
+  missionPhase: 'deployment' | 'recon' | 'aerial_encounter' | 'ground_activity' | 'resolution';
+  missionPhaseNumber: 1 | 2 | 3 | 4 | 5;
+  missionTitle: string;
+  missionObjective: string;
+  markedTargetIds: string[];
+  requiredReconMarks: number;
+  reconScanProgress: number;
+  reconScanTargetName: string | null;
 }

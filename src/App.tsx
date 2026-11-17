@@ -14,6 +14,7 @@ import { FlightViewport, SimCommandBridge } from './engine/FlightViewport';
 import { createInitialDroneState } from './sim/core/simWorld';
 import { GameSettings, loadSettings, saveSettings } from './sim/settings';
 import { AIRFRAMES, DEFAULT_LOADOUT, WEAPONS } from './sim/arsenalData';
+import { normalizeLoadoutConfig } from './sim/weaponCompatibility';
 import {
   AarEventType,
   AarSortieReport,
@@ -87,6 +88,7 @@ const INITIAL_HUD: HudSnapshot = {
   fuelPct: 100,
   stalling: false,
   activeSlot: 0,
+  activeFireMode: DEFAULT_LOADOUT.slotFireModes?.[0] ?? 'single',
   slotAmmo: DEFAULT_LOADOUT.slots.map((id) => WEAPONS[id].ammoPerSlot) as [
     number,
     number,
@@ -140,6 +142,14 @@ const INITIAL_HUD: HudSnapshot = {
   freeLooking: false,
   combatHitCallout: null,
   airContacts: [],
+  missionPhase: 'deployment',
+  missionPhaseNumber: 1,
+  missionTitle: 'Ingress & Patrol Corridor',
+  missionObjective: 'Advance north into Sector 04 operational airspace (Z < 450m)',
+  markedTargetIds: [],
+  requiredReconMarks: 2,
+  reconScanProgress: 0,
+  reconScanTargetName: null,
 };
 
 export default function App() {
@@ -150,7 +160,7 @@ export default function App() {
   const [phase, setPhase] = useState<GamePhase>(autostart ? 'playing' : 'title');
   const [theaterId, setTheaterId] = useState<TheaterId>('edwards');
   const [weatherId, setWeatherId] = useState<WeatherId>('clear');
-  const [utcHours, setUtcHours] = useState<number>(19.2);
+  const [utcHours, setUtcHours] = useState<number>(1.3);
   const [loadout, setLoadout] = useState<LoadoutConfig>(DEFAULT_LOADOUT);
   const [sandbox, setSandbox] = useState<SandboxConfig>(INITIAL_SANDBOX);
   const [settings, setSettings] = useState<GameSettings>(() => loadSettings());
@@ -852,7 +862,10 @@ export default function App() {
           }
           onSelectSlot={(s) => bridgeRef.current?.setActiveSlot(s)}
           onFire={() => bridgeRef.current?.fireActiveOrdnance()}
+          onCycleFireMode={() => bridgeRef.current?.cycleFireMode()}
+          onRequestPointerLock={() => bridgeRef.current?.requestPointerLock()}
           onCycleTarget={() => bridgeRef.current?.cycleTarget()}
+          onMarkReconTarget={() => bridgeRef.current?.markReconTarget()}
           reticleFrameRef={reticleFrameRef}
         />
       )}
@@ -882,7 +895,12 @@ export default function App() {
         skillBonuses={skillBonuses}
         sandbox={sandbox}
         onChangeLoadout={setLoadout}
-        onChangeSandbox={setSandbox}
+        onChangeSandbox={(next) => {
+          setSandbox(next);
+          if (!next.enabled) {
+            setLoadout((curr) => normalizeLoadoutConfig(curr, false));
+          }
+        }}
         onUnlockItem={handleUnlockItem}
         onUpgradeSkill={handleUpgradeSkill}
         onResetSkills={handleResetSkills}
