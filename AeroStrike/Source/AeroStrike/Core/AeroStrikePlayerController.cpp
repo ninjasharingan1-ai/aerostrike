@@ -28,6 +28,18 @@ void AAeroStrikePlayerController::BeginPlay()
     }
 }
 
+void AAeroStrikePlayerController::Tick(float DeltaSeconds)
+{
+    Super::Tick(DeltaSeconds);
+    AAeroStrikeUavPawn* Uav = GetUavPawn();
+    if (!Uav || !Uav->GetFlightComponent()) return;
+    const double Pitch = (IsInputKeyDown(EKeys::W) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::S) ? 1.0 : 0.0);
+    const double Roll = (IsInputKeyDown(EKeys::D) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::A) ? 1.0 : 0.0);
+    const double Yaw = (IsInputKeyDown(EKeys::E) ? 1.0 : 0.0) - (IsInputKeyDown(EKeys::Q) ? 1.0 : 0.0);
+    const double Throttle = IsInputKeyDown(EKeys::LeftShift) ? 0.5 : 0.0;
+    Uav->GetFlightComponent()->SetManualOverrideInput(Pitch, Roll, Yaw, Throttle);
+}
+
 void AAeroStrikePlayerController::SetupInputComponent()
 {
     Super::SetupInputComponent();
@@ -86,7 +98,11 @@ void AAeroStrikePlayerController::OnWindowFocusLost()
 {
     if (AAeroStrikeUavPawn* Uav = GetUavPawn())
     {
-        if (auto* Flight = Uav->GetFlightComponent()) Flight->OnWindowFocusLost();
+        if (auto* Flight = Uav->GetFlightComponent())
+        {
+            Flight->OnWindowFocusLost();
+            Flight->SetManualOverrideInput(0.0, 0.0, 0.0, 0.0);
+        }
         if (auto* Wep = Uav->GetWeaponComponent()) Wep->RequestPrimaryFireReleased();
     }
 }
