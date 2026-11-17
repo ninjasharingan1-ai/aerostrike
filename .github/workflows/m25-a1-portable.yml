@@ -1,0 +1,37 @@
+name: AeroStrike M2.5-A.1 portable recovery checks
+
+on:
+  push:
+    branches: [m25-a1-ue-playability-recovery]
+  pull_request:
+    paths:
+      - 'AeroStrike/**'
+      - 'src/**'
+      - 'scripts/exportUe5DataSeeds.ts'
+      - '.github/workflows/m25-a1-portable.yml'
+
+jobs:
+  portable-simcore:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build portable SimCore test with strict warnings
+        run: g++ -std=c++20 -O2 -Wall -Wextra -Werror AeroStrike/Tests/aerostrike_sim_core_test.cpp -o /tmp/aerostrike_sim_core_test
+      - name: Run SimCore test suites
+        run: /tmp/aerostrike_sim_core_test
+
+  browser-regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install browser reference dependencies
+        run: bun install --frozen-lockfile
+      - name: Regression tests
+        run: bunx tsx --test src/sim/sim.test.ts
+      - name: Typecheck
+        run: bun run lint
+      - name: Web reference production build
+        run: bun run build
+
+# This workflow does not invoke UnrealBuildTool and must never be represented as a UE5 build.
